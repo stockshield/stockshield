@@ -1,3 +1,6 @@
+# stockshield
+실시간 주식 데이터 기반 FDS 관제 및 자동 원장 방어 시스템
+
 # StockShield 프론트엔드 화면 프로토타입
 
 React + Vite로 제작한 주식 시세/호가창/로그인 초기 화면입니다.
