@@ -398,12 +398,13 @@ export function registerRoutes(app) {
 
   // -------------------------------------------------------------
   // 8. 모의 주문 실행 (기능 ID 51~62, 73, 74, 75, 77)
+  // [보안 강화]: JWT 인증(requireAuth) 및 계좌 소유권 검사 강제
   // -------------------------------------------------------------
-  app.post('/api/orders', async (req, res) => {
+  app.post('/api/orders', requireAuth(), async (req, res) => {
     const client = await pool.connect();
     try {
       const {
-        userId,
+        userId: requestedUserId,
         stockCode,
         stockName,
         orderType,
@@ -412,10 +413,30 @@ export function registerRoutes(app) {
         idempotencyKey,
       } = req.body;
 
+      // 0. 인증 사용자 식별 및 계좌 소유권 검사 (타인 계좌 도용 차단)
+      const authUserId = req.user.id;
+      if (requestedUserId && requestedUserId !== authUserId && req.user.role !== 'ADMIN') {
+        return res.status(403).json({
+          success: false,
+          code: 'FORBIDDEN_ACCOUNT_ACCESS',
+          message: '본인 소유의 계좌에 대해서만 주문을 요청할 수 있습니다. (타인 계좌 도용 차단)',
+        });
+      }
+      const userId = authUserId; // 항상 JWT 토큰으로 검증된 사용자 ID 강제 적용
+
+      // 1. 주문 유형 유효성 검사 (UNKNOWN 등 임의 주문 유형 차단)
+      if (!orderType || !['BUY', 'SELL'].includes(orderType)) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_ORDER_TYPE',
+          message: '올바른 주문 유형(BUY, SELL)이 아닙니다. UNKNOWN 등 유효하지 않은 주문 유형은 거절됩니다.',
+        });
+      }
+
       const clientIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
       const userAgent = req.headers['user-agent'] || 'Unknown Client';
 
-      // 1. 멱등키 중복 주문 검사 (기능 ID 54)
+      // 2. 멱등키 중복 주문 검사 (기능 ID 54)
       if (idempotencyKey) {
         const existingOrder = await query('SELECT * FROM orders WHERE idempotency_key = $1', [idempotencyKey]);
         if (existingOrder.rows.length > 0) {
@@ -490,13 +511,19 @@ export function registerRoutes(app) {
       );
       const currentHolding = portRes.rows[0] || { quantity: 0, avg_price: 0 };
 
-      if (orderType === 'BUY' && Number(user.balance) < totalCost) {
+      if (orderType === 'BUY') {
+        if (Number(user.balance) < totalCost) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ success: false, code: 'INSUFFICIENT_BALANCE', message: '주문 가능 예수금이 부족합니다. (잔고 초과 거절)' });
+        }
+      } else if (orderType === 'SELL') {
+        if (currentHolding.quantity < numQty) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ success: false, code: 'INSUFFICIENT_HOLDINGS', message: '보유 주식 수량이 부족합니다. (보유량 초과 거절)' });
+        }
+      } else {
         await client.query('ROLLBACK');
-        return res.status(400).json({ success: false, message: '주문 가능 예수금이 부족합니다. (잔고 초과 거절)' });
-      }
-      if (orderType === 'SELL' && currentHolding.quantity < numQty) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({ success: false, message: '보유 주식 수량이 부족합니다. (보유량 초과 거절)' });
+        return res.status(400).json({ success: false, code: 'INVALID_ORDER_TYPE', message: '올바른 주문 유형(BUY, SELL)이 아닙니다.' });
       }
 
       // 6. FDS 정밀 4대 규칙 판정 (기능 ID 69~75)
@@ -548,7 +575,7 @@ export function registerRoutes(app) {
              SET quantity = EXCLUDED.quantity, avg_price = EXCLUDED.avg_price, updated_at = CURRENT_TIMESTAMP`,
             [userId, stockCode, stockName, newQty, newAvgPrice]
           );
-        } else {
+        } else if (orderType === 'SELL') {
           const newBalance = Number(user.balance) + totalCost;
           const newQty = currentHolding.quantity - numQty;
 
@@ -561,6 +588,9 @@ export function registerRoutes(app) {
               [newQty, userId, stockCode]
             );
           }
+        } else {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ success: false, code: 'INVALID_ORDER_TYPE', message: '지원하지 않는 주문 유형입니다.' });
         }
       }
 
@@ -763,7 +793,7 @@ export function registerRoutes(app) {
              SET quantity = EXCLUDED.quantity, avg_price = EXCLUDED.avg_price, updated_at = CURRENT_TIMESTAMP`,
             [u.id, ord.stock_code, ord.stock_name, newQty, newAvg]
           );
-        } else {
+        } else if (ord.order_type === 'SELL') {
           if (curHolding.quantity < qty) {
             await client.query('ROLLBACK');
             return res.status(400).json({ success: false, message: '승인 시점 보유 주식이 부족하여 체결할 수 없습니다.' });
@@ -780,6 +810,9 @@ export function registerRoutes(app) {
               ord.stock_code,
             ]);
           }
+        } else {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ success: false, message: '올바른 주문 유형(BUY, SELL)이 아닙니다.' });
         }
 
         // 오직 status = 'HOLD'인 주문만 EXECUTED로 원자적 갱신
