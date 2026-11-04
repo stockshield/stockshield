@@ -146,8 +146,8 @@ CREATE TABLE IF NOT EXISTS stock_stats (
 -- 초기 시드 데이터 삽입
 INSERT INTO users (id, password_hash, name, role, email, phone, account_no, balance, seed_amount, fds_base_amount, fds_level, is_locked, lock_reason)
 VALUES 
-  ('demo', '$2b$10$wv1SyrncC801ggASJzHSxOK7DKFXYPgfQkYONbQEcc7zM5N0APc12', '김투자', 'USER', 'demo@stockshield.io', '010-1234-5678', '501-12-883921', 13083850, 10000000, 500000, 'Level 1 안심 보안', FALSE, ''),
-  ('admin', '$2b$10$OnPt6pqj64O3x4i7G.PZweHEYuU.iC4/QjdkCAcqSpL2E3j4hjrc2', '보안관제팀', 'ADMIN', 'security@stockshield.io', '010-9999-8888', '999-00-112233', 50000000, 50000000, 500000, 'Level 3 최고 관제', FALSE, '')
+  ('demo', '$2b$10$Sq8cA9R5BDXK9MWnFkGaE.TWZp9lBxJls9IiPT0OtyqxtbpIv07aC', '김투자', 'USER', 'demo@stockshield.io', '010-1234-5678', '501-12-883921', 13083850, 10000000, 500000, 'Level 1 안심 보안', FALSE, ''),
+  ('admin', '$2b$10$Sq8cA9R5BDXK9MWnFkGaE.TWZp9lBxJls9IiPT0OtyqxtbpIv07aC', '보안관제팀', 'ADMIN', 'security@stockshield.io', '010-9999-8888', '999-00-112233', 50000000, 50000000, 500000, 'Level 3 최고 관제', FALSE, '')
 ON CONFLICT (id) DO UPDATE
 SET password_hash = EXCLUDED.password_hash, role = EXCLUDED.role, fds_base_amount = EXCLUDED.fds_base_amount;
 

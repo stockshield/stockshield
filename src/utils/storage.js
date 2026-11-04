@@ -415,7 +415,9 @@ export function switchSessionUser(userId) {
 
 export async function toggleUserWatchlist(userId, stockCode) {
   try {
-    const res = await apiFetch(`/users/${userId}/watchlist`, {
+    const session = getActiveSession();
+    const endpoint = (session && session.id === userId) ? '/me/watchlist' : `/users/${userId}/watchlist`;
+    const res = await apiFetch(endpoint, {
       method: 'POST',
       body: JSON.stringify({ stockCode }),
     });
@@ -664,20 +666,49 @@ export async function runServerReconciliation() {
   }
 }
 
-// 초기화 시 서버와 동기화
+// 내 계좌 전용 조회 API (GET /api/me)
+// [보안]: URL 파라미터 없이 검증된 JWT 토큰으로 계좌 및 원장 정보 조회
+export async function fetchMyAccount() {
+  try {
+    const res = await apiFetch('/me');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.user) {
+        updateStoredUser(data.user);
+        return { success: true, user: data.user };
+      }
+    }
+    const errData = await res.json().catch(() => ({}));
+    return { success: false, status: res.status, error: errData.message || errData.code };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+// 초기화 시 서버와 동기화 (내 계좌 전용 API /me 우선 호출)
 export async function syncFromPostgres(userId = 'demo') {
   try {
     const tokens = getAuthTokens();
     if (!tokens?.accessToken) return;
 
+    // 내 계좌 전용 API (/me)로 안전하게 조회
     const [uRes, aRes] = await Promise.all([
-      apiFetch(`/users/${userId}`),
+      apiFetch('/me'),
       apiFetch('/alerts'),
     ]);
     if (uRes.ok) {
       const uData = await uRes.json();
       if (uData.user) {
         updateStoredUser(uData.user);
+      }
+    } else if (userId) {
+      // 관리자 등 특정 ID 동기화가 필요한 경우 허용된 엔드포인트 폴백
+      const fallbackRes = await apiFetch(`/users/${userId}`);
+      if (fallbackRes.ok) {
+        const fallbackData = await fallbackRes.json();
+        if (fallbackData.user) {
+          updateStoredUser(fallbackData.user);
+        }
       }
     }
     if (aRes.ok) {
@@ -690,3 +721,4 @@ export async function syncFromPostgres(userId = 'demo') {
     // fallback
   }
 }
+

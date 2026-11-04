@@ -347,52 +347,120 @@ export function registerRoutes(app) {
   // -------------------------------------------------------------
   // 6. 사용자 프로필 및 원장 데이터 조회
   // -------------------------------------------------------------
-  app.get('/api/users/:id', async (req, res) => {
-    try {
-      const { id } = req.params;
-      const userRes = await query('SELECT * FROM users WHERE id = $1', [id]);
-      if (userRes.rows.length === 0) {
-        return res.status(404).json({ error: '사용자를 찾을 수 없습니다.' });
-      }
-      const [watchRes, portRes, orderRes] = await Promise.all([
-        query('SELECT stock_code FROM watchlists WHERE user_id = $1', [id]),
-        query('SELECT * FROM portfolios WHERE user_id = $1', [id]),
-        query('SELECT * FROM orders WHERE user_id = $1 ORDER BY created_at DESC, id DESC', [id]),
-      ]);
+  // -------------------------------------------------------------
+  // 계좌 및 원장 정보 조회 헬퍼 함수
+  // -------------------------------------------------------------
+  async function getFormattedUserAccount(targetId) {
+    const userRes = await query('SELECT * FROM users WHERE id = $1', [targetId]);
+    if (userRes.rows.length === 0) {
+      return null;
+    }
+    const [watchRes, portRes, orderRes] = await Promise.all([
+      query('SELECT stock_code FROM watchlists WHERE user_id = $1', [targetId]),
+      query('SELECT * FROM portfolios WHERE user_id = $1', [targetId]),
+      query('SELECT * FROM orders WHERE user_id = $1 ORDER BY created_at DESC, id DESC', [targetId]),
+    ]);
+    return formatUser(userRes.rows[0], watchRes.rows, portRes.rows, orderRes.rows);
+  }
 
-      const formatted = formatUser(userRes.rows[0], watchRes.rows, portRes.rows, orderRes.rows);
+  // -------------------------------------------------------------
+  // 내 계좌 전용 조회 (GET /api/me)
+  // [보안 핵심]: URL 파라미터 없이 검증된 JWT 토큰의 사용자 ID로만 계좌 조회 (타인 계좌 접근 원천 차단)
+  // -------------------------------------------------------------
+  app.get('/api/me', requireAuth(), async (req, res) => {
+    try {
+      const myId = req.user.id;
+      const formatted = await getFormattedUserAccount(myId);
+      if (!formatted) {
+        return res.status(404).json({ success: false, message: '사용자를 찾을 수 없습니다.' });
+      }
       res.json({ success: true, user: formatted });
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ success: false, message: err.message });
     }
   });
 
   // -------------------------------------------------------------
-  // 7. 관심종목 토글
+  // 6. 사용자 프로필 및 원장 데이터 조회 (GET /api/users/:id)
+  // [보안 검증]:
+  // 1. 토큰 없거나 만료 시 401 차단 (requireAuth)
+  // 2. 토큰 ID와 요청 ID가 다르고 관리자가 아니면 403 차단
+  // 3. 본인 또는 관리자 권한일 때만 정상 조회
   // -------------------------------------------------------------
-  app.post('/api/users/:id/watchlist', async (req, res) => {
+  app.get('/api/users/:id', requireAuth(), async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      // 타인 계좌 접근 검증: 관리자(ADMIN)만 타인 계좌 조회 허용
+      if (req.user.id !== id && req.user.role !== 'ADMIN') {
+        return res.status(403).json({
+          success: false,
+          code: 'FORBIDDEN_ACCOUNT_ACCESS',
+          message: '본인 소유의 계좌만 조회할 수 있습니다. 타인 계좌에 대한 접근 권한(403)이 없습니다.',
+        });
+      }
+
+      const formatted = await getFormattedUserAccount(id);
+      if (!formatted) {
+        return res.status(404).json({ success: false, message: '사용자를 찾을 수 없습니다.' });
+      }
+      res.json({ success: true, user: formatted });
+    } catch (err) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // -------------------------------------------------------------
+  // 7. 관심종목 토글 헬퍼 및 라우트
+  // -------------------------------------------------------------
+  async function toggleWatchlistForUser(targetId, stockCode) {
+    const check = await query('SELECT * FROM watchlists WHERE user_id = $1 AND stock_code = $2', [targetId, stockCode]);
+    if (check.rows.length > 0) {
+      await query('DELETE FROM watchlists WHERE user_id = $1 AND stock_code = $2', [targetId, stockCode]);
+    } else {
+      await query('INSERT INTO watchlists (user_id, stock_code) VALUES ($1, $2)', [targetId, stockCode]);
+    }
+    return await getFormattedUserAccount(targetId);
+  }
+
+  // 내 관심종목 전용 변경 (POST /api/me/watchlist)
+  // [보안 핵심]: URL 파라미터 없이 JWT 토큰 소유자의 관심종목만 변경 처리
+  app.post('/api/me/watchlist', requireAuth(), async (req, res) => {
+    try {
+      const myId = req.user.id;
+      const { stockCode } = req.body;
+      if (!stockCode) return res.status(400).json({ success: false, error: 'stockCode가 필요합니다.' });
+
+      const formatted = await toggleWatchlistForUser(myId, stockCode);
+      res.json({ success: true, user: formatted });
+    } catch (err) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 사용자별 관심종목 변경 (POST /api/users/:id/watchlist)
+  // [보안 검증]:
+  // 1. 토큰 없거나 만료 시 401 차단 (requireAuth)
+  // 2. 토큰 ID와 요청 ID가 다르고 관리자가 아니면 403 차단
+  // 3. 본인 또는 관리자 권한일 때만 정상 변경 처리
+  app.post('/api/users/:id/watchlist', requireAuth(), async (req, res) => {
     try {
       const { id } = req.params;
       const { stockCode } = req.body;
-      if (!stockCode) return res.status(400).json({ error: 'stockCode가 필요합니다.' });
+      if (!stockCode) return res.status(400).json({ success: false, error: 'stockCode가 필요합니다.' });
 
-      const check = await query('SELECT * FROM watchlists WHERE user_id = $1 AND stock_code = $2', [id, stockCode]);
-      if (check.rows.length > 0) {
-        await query('DELETE FROM watchlists WHERE user_id = $1 AND stock_code = $2', [id, stockCode]);
-      } else {
-        await query('INSERT INTO watchlists (user_id, stock_code) VALUES ($1, $2)', [id, stockCode]);
+      if (req.user.id !== id && req.user.role !== 'ADMIN') {
+        return res.status(403).json({
+          success: false,
+          code: 'FORBIDDEN_ACCOUNT_ACCESS',
+          error: '본인 소유의 관심종목만 수정할 수 있습니다. 타인 계좌에 대한 접근 권한(403)이 없습니다.',
+        });
       }
 
-      const [userRes, watchRes, portRes, orderRes] = await Promise.all([
-        query('SELECT * FROM users WHERE id = $1', [id]),
-        query('SELECT stock_code FROM watchlists WHERE user_id = $1', [id]),
-        query('SELECT * FROM portfolios WHERE user_id = $1', [id]),
-        query('SELECT * FROM orders WHERE user_id = $1 ORDER BY created_at DESC, id DESC', [id]),
-      ]);
-
-      res.json({ success: true, user: formatUser(userRes.rows[0], watchRes.rows, portRes.rows, orderRes.rows) });
+      const formatted = await toggleWatchlistForUser(id, stockCode);
+      res.json({ success: true, user: formatted });
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      res.status(500).json({ success: false, error: err.message });
     }
   });
 
