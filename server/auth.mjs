@@ -38,8 +38,12 @@ export function generateTokens(user) {
 
   // Access Token (30분 만료)
   const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '30m' });
-  // Refresh Token (7일 만료)
-  const refreshToken = jwt.sign({ id: user.id }, JWT_REFRESH_SECRET, { expiresIn: '7d' });
+  // Refresh Token (7일 만료, 중복 방지 고유 난수 nonce 포함)
+  const refreshToken = jwt.sign(
+    { id: user.id, jti: Math.random().toString(36).substring(2) + Date.now().toString(36) },
+    JWT_REFRESH_SECRET,
+    { expiresIn: '7d' }
+  );
 
   return { accessToken, refreshToken };
 }

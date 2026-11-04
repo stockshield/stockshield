@@ -53,29 +53,60 @@ async function apiFetch(endpoint, options = {}) {
   });
 
   // 토큰 만료(401) 처리: Refresh Token으로 자동 재발급 시도 (기능 ID 16)
-  if (res.status === 401 && tokens?.refreshToken && endpoint !== '/auth/refresh' && endpoint !== '/auth/login') {
-    try {
-      const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken: tokens.refreshToken }),
-      });
-      if (refreshRes.ok) {
-        const refreshData = await refreshRes.json();
-        const newAccess = refreshData.accessToken || refreshData.tokens?.accessToken;
-        const newRefresh = refreshData.refreshToken || refreshData.tokens?.refreshToken || tokens.refreshToken;
-        if (newAccess) {
-          setAuthTokens({ accessToken: newAccess, refreshToken: newRefresh });
-          headers['Authorization'] = `Bearer ${newAccess}`;
-          return await fetch(`${API_BASE}${endpoint}`, {
-            ...options,
-            headers,
-          });
+  if (res.status === 401 && endpoint !== '/auth/refresh' && endpoint !== '/auth/login') {
+    // 1. Refresh Token이 있는 경우 토큰 갱신 시도
+    if (tokens?.refreshToken) {
+      try {
+        const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken: tokens.refreshToken }),
+        });
+        if (refreshRes.ok) {
+          const refreshData = await refreshRes.json();
+          const newAccess = refreshData.accessToken || refreshData.tokens?.accessToken;
+          const newRefresh = refreshData.refreshToken || refreshData.tokens?.refreshToken || tokens.refreshToken;
+          if (newAccess) {
+            setAuthTokens({ accessToken: newAccess, refreshToken: newRefresh });
+            headers['Authorization'] = `Bearer ${newAccess}`;
+            return await fetch(`${API_BASE}${endpoint}`, {
+              ...options,
+              headers,
+            });
+          }
         }
+      } catch (e) {
+        // refresh failure
       }
-    } catch (e) {
-      // refresh failure
     }
+
+    // 2. 만약 Refresh Token이 없거나 만료되었는데 기본 데모 세션('demo')인 경우 자동 재로그인으로 토큰 복구
+    const currentSession = getActiveSession();
+    if (currentSession && currentSession.id === 'demo') {
+      try {
+        const loginRes = await fetch(`${API_BASE}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: 'demo', password: 'password123!' }),
+        });
+        if (loginRes.ok) {
+          const loginData = await loginRes.json();
+          if (loginData.tokens?.accessToken) {
+            setAuthTokens(loginData.tokens);
+            headers['Authorization'] = `Bearer ${loginData.tokens.accessToken}`;
+            return await fetch(`${API_BASE}${endpoint}`, {
+              ...options,
+              headers,
+            });
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    // 3. 갱신 및 복구 실패 시 만료된 무효 토큰 제거 (다음 요청 오염 방지)
+    clearAuthTokens();
   }
 
   return res;
