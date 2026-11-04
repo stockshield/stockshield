@@ -13,12 +13,14 @@ export default function OrderHistoryModal({ isOpen, onClose, currentUser, onSele
     if (filter === 'EXECUTED') return o.status === 'EXECUTED' || (!o.status && o.fdsStatus?.includes('승인'));
     if (filter === 'HOLD') return o.status === 'HOLD' || o.fdsStatus?.includes('보류');
     if (filter === 'REJECTED') return o.status === 'REJECTED' || o.fdsStatus?.includes('거절') || o.fdsStatus?.includes('차단');
+    if (filter === 'CANCELLED') return o.status === 'CANCELLED' || o.fdsStatus?.includes('취소');
     return true;
   });
 
   const executedCount = orders.filter((o) => o.status === 'EXECUTED' || (!o.status && o.fdsStatus?.includes('승인'))).length;
   const holdCount = orders.filter((o) => o.status === 'HOLD' || o.fdsStatus?.includes('보류')).length;
   const rejectedCount = orders.filter((o) => o.status === 'REJECTED' || o.fdsStatus?.includes('거절')).length;
+  const cancelledCount = orders.filter((o) => o.status === 'CANCELLED' || o.fdsStatus?.includes('취소')).length;
 
   const totalTradingVolume = orders
     .filter((o) => o.status === 'EXECUTED' || (!o.status && o.fdsStatus?.includes('승인')))
@@ -101,6 +103,13 @@ export default function OrderHistoryModal({ isOpen, onClose, currentUser, onSele
             >
               <XCircle size={13} /> 차단/거절 ({rejectedCount})
             </button>
+            <button
+              type="button"
+              className={`filter-tab ${filter === 'CANCELLED' ? 'active' : ''}`}
+              onClick={() => setFilter('CANCELLED')}
+            >
+              <Clock size={13} /> 주문 취소 ({cancelledCount})
+            </button>
           </div>
         </div>
 
@@ -130,9 +139,10 @@ export default function OrderHistoryModal({ isOpen, onClose, currentUser, onSele
                   const isBuy = ord.orderType === 'BUY';
                   const isHold = ord.status === 'HOLD' || ord.fdsStatus?.includes('보류');
                   const isRejected = ord.status === 'REJECTED' || ord.fdsStatus?.includes('거절') || ord.fdsStatus?.includes('차단');
+                  const isCancelled = ord.status === 'CANCELLED' || ord.fdsStatus?.includes('취소');
 
                   return (
-                    <tr key={ord.id} className={isHold ? 'row-hold' : isRejected ? 'row-rejected' : ''}>
+                    <tr key={ord.id} className={isHold ? 'row-hold' : isRejected ? 'row-rejected' : isCancelled ? 'row-cancelled' : ''}>
                       <td className="time-col">{ord.timestamp}</td>
                       <td>
                         <button
@@ -167,6 +177,10 @@ export default function OrderHistoryModal({ isOpen, onClose, currentUser, onSele
                         ) : isRejected ? (
                           <span className="status-pill rejected">
                             <XCircle size={12} /> 주문 차단/거절
+                          </span>
+                        ) : isCancelled ? (
+                          <span className="status-pill cancelled">
+                            <X size={12} /> 주문 취소 (만료)
                           </span>
                         ) : (
                           <span className="status-pill executed">

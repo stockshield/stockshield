@@ -1000,10 +1000,15 @@ export function registerRoutes(app) {
       await client.query('COMMIT');
 
       const allAlerts = await query('SELECT * FROM fds_alerts ORDER BY created_at DESC');
+      let updatedUser = null;
+      if (alertRow.user_id) {
+        updatedUser = await getFormattedUserAccount(alertRow.user_id);
+      }
       res.json({
         success: true,
         message: `${actionType} 조치가 정상적으로 원장 및 DB에 반영되었습니다.`,
         alerts: allAlerts.rows.map(formatAlert),
+        user: updatedUser,
       });
     } catch (err) {
       await client.query('ROLLBACK');

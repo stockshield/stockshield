@@ -592,13 +592,13 @@ function App() {
   };
 
   // 관심 종목 토글
-  const handleToggleWatchlist = (stockCode) => {
+  const handleToggleWatchlist = async (stockCode) => {
     if (!currentUser) {
       alert('관심 종목을 등록하려면 먼저 로그인 또는 회원가입을 해주세요.');
       setIsSignUpOpen(true);
       return;
     }
-    const updated = toggleUserWatchlist(currentUser.id, stockCode);
+    const updated = await toggleUserWatchlist(currentUser.id, stockCode);
     if (updated) {
       setCurrentUser(updated);
       const isStarred = updated.watchlist?.includes(stockCode);

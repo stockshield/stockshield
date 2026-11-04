@@ -62,9 +62,11 @@ async function apiFetch(endpoint, options = {}) {
       });
       if (refreshRes.ok) {
         const refreshData = await refreshRes.json();
-        if (refreshData.accessToken) {
-          setAuthTokens({ ...tokens, accessToken: refreshData.accessToken });
-          headers['Authorization'] = `Bearer ${refreshData.accessToken}`;
+        const newAccess = refreshData.accessToken || refreshData.tokens?.accessToken;
+        const newRefresh = refreshData.refreshToken || refreshData.tokens?.refreshToken || tokens.refreshToken;
+        if (newAccess) {
+          setAuthTokens({ accessToken: newAccess, refreshToken: newRefresh });
+          headers['Authorization'] = `Bearer ${newAccess}`;
           return await fetch(`${API_BASE}${endpoint}`, {
             ...options,
             headers,
@@ -613,6 +615,9 @@ export async function updateAlertStatus(alertId, actionType, adminComment = '') 
 
     if (data.alerts) {
       localStorage.setItem(ALERTS_STORAGE_KEY, JSON.stringify(data.alerts));
+    }
+    if (data.user) {
+      updateStoredUser(data.user);
     }
 
     // 만약 잠금 해제(UNLOCKED)된 경우 계좌 잠금 플래그도 해제

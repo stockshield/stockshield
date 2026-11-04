@@ -1180,6 +1180,12 @@ input:focus-visible {
 .section-heading {
   font-size: 13px;
   color: #e5ecf4;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.section-heading strong {
+  white-space: nowrap;
 }
 
 .section-heading svg {
@@ -1765,58 +1771,15 @@ input:focus-visible {
 }
 
 /* --- Media Queries --- */
-@media (max-width: 1450px) {
+/* 기준 변경: 1600px 이하(모든 노트북 및 일반 데스크톱 창 크기)에서 두 번째 사진과 같은 2단 레이아웃 자동 적용 */
+@media (max-width: 1600px) {
   .layout {
-    grid-template-columns: 300px minmax(380px, 1fr) 320px;
+    grid-template-columns: 295px minmax(0, 1fr);
   }
 
   .content {
-    padding: 30px 20px;
-  }
-
-  .trading-grid {
-    grid-template-columns: minmax(0, 1fr) 200px;
-    gap: 12px;
-  }
-
-  .market-strip>div {
-    padding: 15px 11px;
-  }
-
-  .market-strip strong {
-    font-size: 17px;
-  }
-
-  .auth-sidebar {
-    padding: 22px 12px;
-  }
-
-  .auth-card {
-    padding: 24px 15px;
-  }
-
-  .stock-overview {
-    padding: 12px 14px;
-  }
-
-  .chart-card {
-    padding: 17px 12px;
-  }
-
-  .ohlc {
-    gap: 9px;
-  }
-}
-
-@media (max-width: 1200px) {
-  .topbar-tagline {
-    display: none;
-  }
-}
-
-@media (max-width: 1150px) {
-  .layout {
-    grid-template-columns: 295px minmax(0, 1fr);
+    grid-column: 2;
+    padding: 24px 20px;
   }
 
   .auth-sidebar {
@@ -1830,9 +1793,10 @@ input:focus-visible {
     display: grid;
     grid-template-columns: minmax(0, 430px) minmax(0, 1fr);
     align-items: start;
+    padding: 20px 14px;
   }
 
-  /* 로그인 상태에서는 화면 축소 시 분할창에 주문 패널이 위치하므로 하단 사이드바 중복 숨김 */
+  /* 로그인 상태에서는 분할창(차트 하단)에 주문 패널이 위치하므로 중복 우측 사이드바 숨김 */
   .auth-sidebar.user-logged-in {
     display: none !important;
   }
@@ -1841,16 +1805,13 @@ input:focus-visible {
     display: none;
   }
 
-  .content {
-    grid-column: 2;
-  }
-
+  /* 차트 및 시세 개요를 가로 전체 너비(1fr)로 확장하여 잘림 원천 방지 */
   .trading-grid {
     grid-template-columns: minmax(0, 1fr);
     gap: 14px;
   }
 
-  /* 화면이 줄었을 때: 호가창 자리에 호가창(좌측)과 구매/판매 주문창(우측) 50:50 분할 */
+  /* 차트 하단: 호가창(좌측)과 매수/매도 주문창(우측) 50:50 나란히 분할 배치 (두 번째 사진 형태) */
   .orderbook-order-split {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -1898,6 +1859,32 @@ input:focus-visible {
 
   .market-strip {
     grid-template-columns: repeat(4, 1fr);
+  }
+
+  .market-strip>div {
+    padding: 15px 11px;
+  }
+
+  .market-strip strong {
+    font-size: 17px;
+  }
+
+  .stock-overview {
+    padding: 12px 14px;
+  }
+
+  .chart-card {
+    padding: 17px 12px;
+  }
+
+  .ohlc {
+    gap: 9px;
+  }
+}
+
+@media (max-width: 1200px) {
+  .topbar-tagline {
+    display: none;
   }
 }
 
@@ -4634,6 +4621,12 @@ button:disabled,
   background: rgba(168, 85, 247, 0.15);
   color: #c084fc;
   border: 1px solid rgba(168, 85, 247, 0.35);
+}
+
+.status-pill.cancelled {
+  background: rgba(148, 163, 184, 0.12);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.3);
 }
 
 .reason-text {
