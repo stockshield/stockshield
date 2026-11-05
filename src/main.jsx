@@ -1673,11 +1673,11 @@ function App() {
                 </div>
                 {/* 당일 시세 OHLC (시/고/저/종) - 종목 개요 우측(옆)에 배치 */}
                 <div className="stock-overview-ohlc">
-                  <div className="ohlc-meta-top" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
-                    <span style={{ fontSize: '11px', color: '#8aa1be', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                      <Calendar size={11} /> 기준: <strong style={{ color: '#d8e7fa' }}>{activeCandle?.dateStr || '2026.11.05 (목)'}</strong>
+                  <div className="ohlc-meta-top">
+                    <span style={{ fontSize: '11px', color: '#8aa1be', display: 'inline-flex', alignItems: 'center', gap: '4px', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                      <Calendar size={11} style={{ flexShrink: 0 }} /> 기준: <strong style={{ color: '#d8e7fa', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '165px' }}>{activeCandle?.dateStr || '2026.11.05 (목)'}</strong>
                     </span>
-                    <span style={{ fontSize: '10px', color: '#687e99', fontWeight: 600 }}>{getIntervalBadgeLabel(chartInterval)}</span>
+                    <span style={{ fontSize: '10px', color: '#687e99', fontWeight: 600, flexShrink: 0 }}>{getIntervalBadgeLabel(chartInterval)}</span>
                   </div>
                   <div className="ohlc-grid">
                     <div className="ohlc-card">
