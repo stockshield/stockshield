@@ -1308,6 +1308,130 @@ input:focus-visible {
   height: auto;
 }
 
+.candle-svg.draggable {
+  cursor: grab;
+}
+
+.candle-svg.is-dragging {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
+/* 차트 제어 툴바 (줌 / 전체화면 / 리셋) */
+.chart-head-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.chart-tools-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chart-tool-btn {
+  background: #111a28;
+  border: 1px solid #23354b;
+  color: #9cb1cb;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.chart-tool-btn:hover {
+  background: #1d2c40;
+  color: #ffffff;
+  border-color: #3f5a82;
+}
+
+.chart-tool-btn.reset-btn {
+  background: rgba(37, 99, 235, 0.14);
+  border-color: rgba(59, 130, 246, 0.4);
+  color: #60a5fa;
+}
+
+.chart-tool-btn.reset-btn:hover {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.chart-tool-btn.fullscreen-btn {
+  background: #162438;
+  border-color: #2e4463;
+  color: #93b4e2;
+}
+
+.chart-tool-btn.fullscreen-btn:hover {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #3b82f6;
+}
+
+.chart-guide-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(23, 35, 52, 0.7);
+  border: 1px solid #1f2f43;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  color: #7b90aa;
+}
+
+/* 전체화면 모드 오버레이 */
+.chart-card.fullscreen-chart-active {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 99999 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  background: #090e17 !important;
+  padding: 24px 36px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  box-shadow: 0 0 60px rgba(0, 0, 0, 0.9) !important;
+  overflow: hidden !important;
+}
+
+.chart-card.fullscreen-chart-active .chart-head {
+  padding-bottom: 14px;
+  border-bottom: 1px solid #1a2738;
+  margin-bottom: 12px;
+}
+
+.chart-card.fullscreen-chart-active .chart-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+
+.chart-card.fullscreen-chart-active .candle-svg {
+  width: 100%;
+  height: 100%;
+  max-height: calc(100vh - 150px);
+}
+
+.chart-card.fullscreen-chart-active .chart-footer {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #152233;
+}
+
 .chart-footer {
   display: flex;
   gap: 13px;

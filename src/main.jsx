@@ -31,7 +31,13 @@ import {
   Sparkles,
   AlertCircle,
   AlertTriangle,
-  Coins
+  Coins,
+  Maximize2,
+  Minimize2,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
+  MoveHorizontal
 } from 'lucide-react';
 import './styles.css';
 import SignUpModal from './components/SignUpModal';
@@ -84,16 +90,16 @@ async function fetchStockPrice(code, signal) {
 }
 
 const INTERVAL_CONFIGS = {
-  '1분': { count: 50, startRatio: 0.995, waveAmp: 0.003, wickAmp: 0.0012 },
-  '5분': { count: 48, startRatio: 0.991, waveAmp: 0.0045, wickAmp: 0.0016 },
-  '10분': { count: 46, startRatio: 0.987, waveAmp: 0.0055, wickAmp: 0.0018 },
-  '30분': { count: 44, startRatio: 0.982, waveAmp: 0.0065, wickAmp: 0.0020 },
-  '1시간': { count: 42, startRatio: 0.975, waveAmp: 0.008, wickAmp: 0.0022 },
-  '3시간': { count: 40, startRatio: 0.965, waveAmp: 0.0095, wickAmp: 0.0025 },
-  '1일': { count: 46, startRatio: 0.978, waveAmp: 0.007, wickAmp: 0.0025 },
-  '1주': { count: 35, startRatio: 0.930, waveAmp: 0.012, wickAmp: 0.0035 },
-  '1개월': { count: 22, startRatio: 0.970, waveAmp: 0.008, wickAmp: 0.0025 },
-  '3개월': { count: 60, startRatio: 0.940, waveAmp: 0.012, wickAmp: 0.0035 },
+  '1분': { count: 80, startRatio: 0.995, waveAmp: 0.003, wickAmp: 0.0012 },
+  '5분': { count: 80, startRatio: 0.991, waveAmp: 0.0045, wickAmp: 0.0016 },
+  '10분': { count: 80, startRatio: 0.987, waveAmp: 0.0055, wickAmp: 0.0018 },
+  '30분': { count: 70, startRatio: 0.982, waveAmp: 0.0065, wickAmp: 0.0020 },
+  '1시간': { count: 75, startRatio: 0.975, waveAmp: 0.008, wickAmp: 0.0022 },
+  '3시간': { count: 70, startRatio: 0.965, waveAmp: 0.0095, wickAmp: 0.0025 },
+  '1일': { count: 120, startRatio: 0.978, waveAmp: 0.007, wickAmp: 0.0025 },
+  '1주': { count: 70, startRatio: 0.930, waveAmp: 0.012, wickAmp: 0.0035 },
+  '1개월': { count: 50, startRatio: 0.970, waveAmp: 0.008, wickAmp: 0.0025 },
+  '3개월': { count: 100, startRatio: 0.940, waveAmp: 0.012, wickAmp: 0.0035 },
 };
 
 // KRX 영업일(주말 제외) 및 일자/시간 포맷터
@@ -266,15 +272,164 @@ function buildCandles(seed, interval, currentPrice) {
 
 function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, setHover }) {
   const currentPrice = stock?.price || 70000;
-  const W = 890, H = 310, left = 16, right = 76, top = 14, chartBottom = 208, volumeTop = 228, volumeBottom = 266;
-  const high = Math.max(...candles.map((c) => c.high)) * 1.003;
-  const low = Math.min(...candles.map((c) => c.low)) * 0.997;
+
+  // 1. 줌 & 팬 상태 관리 (기본 45개 표시, 드래그 및 마우스 휠로 조절)
+  const [zoomCount, setZoomCount] = useState(45);
+  const [panOffset, setPanOffset] = useState(0); // 0: 최신 데이터, >0: 과거 데이터
+  const [isDragging, setIsDragging] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const chartWrapRef = useRef(null);
+  const dragStartRef = useRef({ x: 0, panOffset: 0, hasMoved: false });
+
+  // 주기(interval) 변경 시 기본 뷰(최신 시세, 45개)로 리셋
+  useEffect(() => {
+    setZoomCount(45);
+    setPanOffset(0);
+    setHover(null);
+  }, [chartInterval]);
+
+  // 전체화면 시 ESC 키로 닫기 및 배경 스크롤 방지
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setIsFullscreen(false);
+    };
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = '';
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isFullscreen]);
+
+  // 마우스 휠 확대/축소 (패시브 이벤트 충돌 방지 및 부드러운 줌)
+  useEffect(() => {
+    const el = chartWrapRef.current;
+    if (!el) return;
+
+    const onWheel = (e) => {
+      e.preventDefault();
+      // 위로 스크롤: 확대 (캔들 수 감소), 아래로 스크롤: 축소 (캔들 수 증가)
+      const delta = e.deltaY < 0 ? -4 : 4;
+      setZoomCount((prev) => {
+        const minCount = 16;
+        const maxCount = Math.min(candles.length, 90);
+        return Math.max(minCount, Math.min(maxCount, prev + delta));
+      });
+    };
+
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [candles.length]);
+
+  // 슬라이스된 화면 표시용 캔들 계산
+  const totalCandles = candles.length;
+  const clampedZoom = Math.max(16, Math.min(totalCandles, zoomCount));
+  const maxOffset = Math.max(0, totalCandles - clampedZoom);
+  const clampedOffset = Math.max(0, Math.min(maxOffset, panOffset));
+
+  const startIndex = totalCandles - clampedZoom - clampedOffset;
+  const endIndex = totalCandles - clampedOffset;
+  const visibleCandles = candles.slice(startIndex, endIndex);
+
+  // 차트 뷰포트 좌표 (일반 vs 전체화면)
+  const W = isFullscreen ? 1240 : 890;
+  const H = isFullscreen ? 500 : 310;
+  const left = isFullscreen ? 20 : 16;
+  const right = isFullscreen ? 84 : 76;
+  const top = isFullscreen ? 20 : 14;
+  const chartBottom = isFullscreen ? 350 : 208;
+  const volumeTop = isFullscreen ? 385 : 228;
+  const volumeBottom = isFullscreen ? 450 : 266;
+  const xAxisDividerY = isFullscreen ? 456 : 270;
+  const xAxisTextY = isFullscreen ? 472 : 283;
+  const hoverBadgeY = isFullscreen ? 478 : 291;
+  const hoverTextY = isFullscreen ? 491 : 303;
+
+  const high = Math.max(...visibleCandles.map((c) => c.high)) * 1.003;
+  const low = Math.min(...visibleCandles.map((c) => c.low)) * 0.997;
   const y = (p) => top + ((high - p) / (high - low)) * (chartBottom - top);
-  const step = (W - left - right) / candles.length;
+  const step = (W - left - right) / visibleCandles.length;
   const lineY = y(currentPrice);
 
+  const isViewCustomized = clampedOffset > 0 || clampedZoom !== 45;
+
+  const handleResetView = () => {
+    setPanOffset(0);
+    setZoomCount(45);
+    setHover(null);
+  };
+
+  // 마우스 좌우 드래그 이동 (과거 / 현재 데이터 탐색)
+  const handleMouseDown = (e) => {
+    if (e.button !== 0) return;
+    setIsDragging(true);
+    dragStartRef.current = {
+      x: e.clientX,
+      panOffset: clampedOffset,
+      hasMoved: false,
+    };
+  };
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const onMouseMove = (e) => {
+      const dx = e.clientX - dragStartRef.current.x;
+      if (Math.abs(dx) > 3) {
+        dragStartRef.current.hasMoved = true;
+        setHover(null);
+      }
+      const candlePxWidth = (W - left - right) / visibleCandles.length;
+      const candleShift = Math.round(dx / Math.max(4, candlePxWidth));
+      const maxOff = Math.max(0, candles.length - clampedZoom);
+      const newOffset = Math.max(0, Math.min(maxOff, dragStartRef.current.panOffset + candleShift));
+      setPanOffset(newOffset);
+    };
+
+    const onMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [isDragging, clampedZoom, candles.length, visibleCandles.length, W, left, right]);
+
+  // 터치 스와이프 드래그 지원
+  const handleTouchStart = (e) => {
+    if (e.touches.length !== 1) return;
+    setIsDragging(true);
+    dragStartRef.current = {
+      x: e.touches[0].clientX,
+      panOffset: clampedOffset,
+      hasMoved: false,
+    };
+  };
+
+  const handleTouchMove = (e) => {
+    if (!isDragging || e.touches.length !== 1) return;
+    const dx = e.touches[0].clientX - dragStartRef.current.x;
+    const candlePxWidth = (W - left - right) / visibleCandles.length;
+    const candleShift = Math.round(dx / Math.max(4, candlePxWidth));
+    const maxOff = Math.max(0, candles.length - clampedZoom);
+    const newOffset = Math.max(0, Math.min(maxOff, dragStartRef.current.panOffset + candleShift));
+    setPanOffset(newOffset);
+  };
+
+  const handleTouchEnd = () => {
+    setIsDragging(false);
+  };
+
+  const isHoverVisible = hover !== null && hover >= startIndex && hover < endIndex;
+  const visibleHoverIndex = isHoverVisible ? hover - startIndex : null;
+
   return (
-    <div className="chart-card panel">
+    <div className={`chart-card panel ${isFullscreen ? 'fullscreen-chart-active' : ''}`}>
       <div className="chart-head">
         <div className="section-heading">
           <CandlestickChart size={18} />
@@ -297,52 +452,124 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
             title="현재 선택 또는 호버된 캔들의 기준 일자 및 시간"
           >
             <Clock size={11} />
-            {hover !== null && candles[hover] ? candles[hover].dateStr : (candles.at(-1)?.dateStr || '2026.11.05')}
+            {isHoverVisible && visibleCandles[visibleHoverIndex]
+              ? visibleCandles[visibleHoverIndex].dateStr
+              : (visibleCandles.at(-1)?.dateStr || '2026.11.05')}
           </span>
+          {clampedOffset > 0 && (
+            <span
+              style={{
+                fontSize: '11px',
+                color: '#ffbe55',
+                background: 'rgba(255, 178, 36, 0.12)',
+                border: '1px solid rgba(255, 178, 36, 0.35)',
+                padding: '2px 8px',
+                borderRadius: '5px',
+                fontWeight: 600,
+              }}
+              title="현재 최신 시세가 아닌 과거 특정 구간을 조회 중입니다."
+            >
+              과거 시세 조회 중 ({clampedOffset}봉 전)
+            </span>
+          )}
         </div>
-        <div className="intervals" role="tablist" aria-label="차트 주기 선택">
-          <div className="interval-group">
-            {['1분', '5분', '10분', '30분'].map((item) => (
-              <button
-                key={item}
-                type="button"
-                className={chartInterval === item ? 'selected' : ''}
-                onClick={() => { setHover(null); setChartInterval(item); }}
-              >
-                {item}
-              </button>
-            ))}
+
+        <div className="chart-head-controls">
+          <div className="intervals" role="tablist" aria-label="차트 주기 선택">
+            <div className="interval-group">
+              {['1분', '5분', '10분', '30분'].map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  className={chartInterval === item ? 'selected' : ''}
+                  onClick={() => { setHover(null); setChartInterval(item); }}
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+            <span className="interval-divider" />
+            <div className="interval-group">
+              {['1시간', '3시간'].map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  className={chartInterval === item ? 'selected' : ''}
+                  onClick={() => { setHover(null); setChartInterval(item); }}
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+            <span className="interval-divider" />
+            <div className="interval-group">
+              {['1일', '1주', '1개월', '3개월'].map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  className={chartInterval === item ? 'selected' : ''}
+                  onClick={() => { setHover(null); setChartInterval(item); }}
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
           </div>
-          <span className="interval-divider" />
-          <div className="interval-group">
-            {['1시간', '3시간'].map((item) => (
+
+          <div className="chart-tools-group">
+            <button
+              type="button"
+              className="chart-tool-btn"
+              onClick={() => setZoomCount((prev) => Math.max(16, prev - 6))}
+              title="차트 확대 (캔들 크게 보기)"
+            >
+              <ZoomIn size={13} />
+            </button>
+            <button
+              type="button"
+              className="chart-tool-btn"
+              onClick={() => setZoomCount((prev) => Math.min(candles.length, prev + 6))}
+              title="차트 축소 (캔들 작게 전체 보기)"
+            >
+              <ZoomOut size={13} />
+            </button>
+            {isViewCustomized && (
               <button
-                key={item}
                 type="button"
-                className={chartInterval === item ? 'selected' : ''}
-                onClick={() => { setHover(null); setChartInterval(item); }}
+                className="chart-tool-btn reset-btn"
+                onClick={handleResetView}
+                title="최신 시세 및 기본 배율(45개)로 리셋"
               >
-                {item}
+                <RotateCcw size={12} /> 최신으로
               </button>
-            ))}
-          </div>
-          <span className="interval-divider" />
-          <div className="interval-group">
-            {['1일', '1주', '1개월', '3개월'].map((item) => (
-              <button
-                key={item}
-                type="button"
-                className={chartInterval === item ? 'selected' : ''}
-                onClick={() => { setHover(null); setChartInterval(item); }}
-              >
-                {item}
-              </button>
-            ))}
+            )}
+            <button
+              type="button"
+              className={`chart-tool-btn fullscreen-btn ${isFullscreen ? 'active' : ''}`}
+              onClick={() => setIsFullscreen(!isFullscreen)}
+              title={isFullscreen ? '전체화면 닫기 (ESC)' : '전체화면 확대 보기'}
+            >
+              {isFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+              <span>{isFullscreen ? '닫기 (ESC)' : '전체화면'}</span>
+            </button>
           </div>
         </div>
       </div>
-      <div className="chart-wrap">
-        <svg className="candle-svg" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="예시 캔들 차트">
+
+      <div
+        className="chart-wrap"
+        ref={chartWrapRef}
+        onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
+        <svg
+          className={`candle-svg draggable ${isDragging ? 'is-dragging' : ''}`}
+          viewBox={`0 0 ${W} ${H}`}
+          role="img"
+          aria-label="인터랙티브 캔들 차트"
+        >
           {[0, 1, 2, 3, 4].map((i) => {
             const yy = top + (i * (chartBottom - top)) / 4;
             return (
@@ -355,14 +582,23 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
             );
           })}
           <line x1={left} x2={W - right + 6} y1={volumeTop - 8} y2={volumeTop - 8} stroke="#293341" />
-          {candles.map((c, i) => {
+          {visibleCandles.map((c, i) => {
             const x = left + i * step + step / 2;
             const up = c.close >= c.open;
             const cColor = up ? '#f06770' : '#4d9cf2';
             const bodyTop = Math.min(y(c.open), y(c.close));
             const bodyH = Math.max(1.7, Math.abs(y(c.open) - y(c.close)));
             return (
-              <g key={i} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} style={{ cursor: 'crosshair' }}>
+              <g
+                key={startIndex + i}
+                onMouseEnter={() => {
+                  if (!isDragging) setHover(startIndex + i);
+                }}
+                onMouseLeave={() => {
+                  if (!isDragging) setHover(null);
+                }}
+                style={{ cursor: 'crosshair' }}
+              >
                 <line x1={x} x2={x} y1={y(c.high)} y2={y(c.low)} stroke={cColor} strokeWidth="1.5" />
                 <rect x={x - step * 0.27} y={bodyTop} width={step * 0.54} height={bodyH} rx=".7" fill={cColor} />
                 <rect
@@ -377,19 +613,22 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
               </g>
             );
           })}
+
           <line x1={left} x2={W - right + 6} y1={lineY} y2={lineY} stroke="#a1b6cf" strokeDasharray="4 4" opacity=".7" />
           <rect x={W - right + 3} y={lineY - 10} width={right - 2} height="20" rx="4" fill="#426782" />
           <text x={W - right + 8} y={lineY + 4} fontSize="11" fill="#fff">
             {won(currentPrice)}
           </text>
+
           {/* 하단 X축 구분 보조선 */}
-          <line x1={left} x2={W - right} y1={270} y2={270} stroke="#1b2533" strokeWidth="1" />
+          <line x1={left} x2={W - right} y1={xAxisDividerY} y2={xAxisDividerY} stroke="#1b2533" strokeWidth="1" />
+
           {/* 상단 행: 차트 기준 시간 라벨 (X축) */}
-          {getIntervalLabels(chartInterval, candles).map((t, i) => (
+          {getIntervalLabels(chartInterval, visibleCandles).map((t, i) => (
             <text
               key={t + i}
               x={left + 35 + ((W - left - right - 80) * i) / 4}
-              y={283}
+              y={xAxisTextY}
               fontSize="11"
               textAnchor="middle"
               fill="#74859a"
@@ -397,22 +636,23 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
               {t}
             </text>
           ))}
+
           {/* 하단 행: 커서 호버 시 시간 배지 (위의 기준 시간과 겹치지 않도록 살짝 아래로 내려서 배치) */}
-          {hover !== null && candles[hover] && (
+          {isHoverVisible && visibleCandles[visibleHoverIndex] && (
             <g pointerEvents="none">
               <line
-                x1={left + hover * step + step / 2}
-                x2={left + hover * step + step / 2}
+                x1={left + visibleHoverIndex * step + step / 2}
+                x2={left + visibleHoverIndex * step + step / 2}
                 y1={top}
-                y2={291}
+                y2={hoverBadgeY}
                 stroke="#63a7ff"
                 strokeWidth="1"
                 strokeDasharray="2 3"
                 opacity="0.85"
               />
               <rect
-                x={Math.max(left, Math.min(W - right - 78, left + hover * step + step / 2 - 39))}
-                y={291}
+                x={Math.max(left, Math.min(W - right - 78, left + visibleHoverIndex * step + step / 2 - 39))}
+                y={hoverBadgeY}
                 width="78"
                 height="16"
                 rx="4"
@@ -421,22 +661,26 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
                 strokeWidth="1"
               />
               <text
-                x={Math.max(left + 39, Math.min(W - right - 39, left + hover * step + step / 2))}
-                y={303}
+                x={Math.max(left + 39, Math.min(W - right - 39, left + visibleHoverIndex * step + step / 2))}
+                y={hoverTextY}
                 fontSize="10"
                 fontWeight="700"
                 fill="#ffffff"
                 textAnchor="middle"
               >
-                {candles[hover].label}
+                {visibleCandles[visibleHoverIndex].label}
               </text>
             </g>
           )}
         </svg>
       </div>
+
       <div className="chart-footer">
         <span><span className="dot red" /> 상승</span>
         <span><span className="dot blue" /> 하락</span>
+        <span className="chart-guide-pill">
+          <MoveHorizontal size={11} /> 드래그: 과거/현재 이동 · 마우스 휠: 확대/축소
+        </span>
         <span className="muted push">
           {stock?.source === 'KIS'
             ? '실시간 KIS 현재가 기준으로 스케일된 캔들 차트입니다.'
