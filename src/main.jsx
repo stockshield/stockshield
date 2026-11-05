@@ -91,9 +91,9 @@ const INTERVAL_CONFIGS = {
   '1시간': { count: 42, startRatio: 0.975, waveAmp: 0.008, wickAmp: 0.0022 },
   '3시간': { count: 40, startRatio: 0.965, waveAmp: 0.0095, wickAmp: 0.0025 },
   '1일': { count: 46, startRatio: 0.978, waveAmp: 0.007, wickAmp: 0.0025 },
-  '1주': { count: 40, startRatio: 0.930, waveAmp: 0.012, wickAmp: 0.0035 },
-  '1개월': { count: 36, startRatio: 0.890, waveAmp: 0.018, wickAmp: 0.0050 },
-  '3개월': { count: 48, startRatio: 0.820, waveAmp: 0.024, wickAmp: 0.0070 },
+  '1주': { count: 35, startRatio: 0.930, waveAmp: 0.012, wickAmp: 0.0035 },
+  '1개월': { count: 22, startRatio: 0.970, waveAmp: 0.008, wickAmp: 0.0025 },
+  '3개월': { count: 60, startRatio: 0.940, waveAmp: 0.012, wickAmp: 0.0035 },
 };
 
 // KRX 영업일(주말 제외) 및 일자/시간 포맷터
@@ -107,9 +107,18 @@ function formatKRXDate(d, fmt = 'MM/DD') {
 
   if (fmt === 'YYYY.MM.DD') return `${yyyy}.${mm}.${dd}`;
   if (fmt === 'YYYY.MM.DD (DAY)') return `${yyyy}.${mm}.${dd} (${dayName})`;
+  if (fmt === 'YY.MM.DD') return `${yy}.${mm}.${dd}`;
   if (fmt === 'YY.MM') return `${yy}.${mm}`;
   if (fmt === 'YYYY.MM') return `${yyyy}.${mm}`;
   return `${mm}/${dd}`;
+}
+
+function getIntervalBadgeLabel(interval) {
+  if (interval === '1일') return '일봉';
+  if (interval === '1주') return '주봉';
+  if (interval === '1개월') return '최근 1개월 (일봉)';
+  if (interval === '3개월') return '최근 3개월 (일봉)';
+  return `${interval} 봉`;
 }
 
 // 직전 N개의 KRX 영업일(주말 제외) 배열 생성 (과거 -> 현재 순서)
@@ -131,7 +140,7 @@ function generateCandleTimestamps(interval, count) {
   const now = new Date();
 
   if (interval === '1일') {
-    // 1일봉: 실제 최근 N개 KRX 영업일 (정확한 일자: 09/03, 10/15, 11/05 등)
+    // 1일 (일봉): 최근 약 2개월(46영업일) KRX 실제 영업일
     const tradingDays = getRecentTradingDays(count, now);
     return tradingDays.map((d) => ({
       dateStr: formatKRXDate(d, 'YYYY.MM.DD (DAY)'),
@@ -139,22 +148,26 @@ function generateCandleTimestamps(interval, count) {
     }));
   }
 
-  if (interval === '3시간') {
-    // 3시간봉: 최근 영업일의 오전(09:00~12:00)과 오후(12:00~15:30)
-    const dayCount = Math.ceil(count / 2);
-    const tradingDays = getRecentTradingDays(dayCount, now);
-    const result = [];
-    tradingDays.forEach((d) => {
-      const dStr = formatKRXDate(d, 'YYYY.MM.DD');
-      const mmdd = formatKRXDate(d, 'MM/DD');
-      result.push({ dateStr: `${dStr} 09:00~12:00`, label: `${mmdd} 09시` });
-      result.push({ dateStr: `${dStr} 12:00~15:30`, label: `${mmdd} 12시` });
-    });
-    return result.slice(-count);
+  if (interval === '1개월') {
+    // 1개월: 최근 1개월간(약 22영업일)의 실제 KRX 거래일자 (MM/DD)
+    const tradingDays = getRecentTradingDays(count, now);
+    return tradingDays.map((d) => ({
+      dateStr: formatKRXDate(d, 'YYYY.MM.DD (DAY)'),
+      label: formatKRXDate(d, 'MM/DD'),
+    }));
+  }
+
+  if (interval === '3개월') {
+    // 3개월: 최근 3개월간(약 60영업일)의 실제 KRX 거래일자 (MM/DD: 08/11, 09/01, 09/22, 10/15, 11/05 등)
+    const tradingDays = getRecentTradingDays(count, now);
+    return tradingDays.map((d) => ({
+      dateStr: formatKRXDate(d, 'YYYY.MM.DD (DAY)'),
+      label: formatKRXDate(d, 'MM/DD'),
+    }));
   }
 
   if (interval === '1주') {
-    // 1주봉: 최근 N개 주의 시작일(월요일)
+    // 1주 (주봉): 최근 N개 주의 시작일(월요일)
     const weeks = [];
     const curr = new Date(now);
     const day = curr.getDay();
@@ -169,43 +182,23 @@ function generateCandleTimestamps(interval, count) {
       endOfWeek.setDate(d.getDate() + 4);
       return {
         dateStr: `${formatKRXDate(d, 'YYYY.MM.DD')} ~ ${formatKRXDate(endOfWeek, 'MM.DD')} 주차`,
-        label: formatKRXDate(d, 'YY.MM'),
+        label: formatKRXDate(d, 'YY.MM.DD'),
       };
     });
   }
 
-  if (interval === '1개월') {
-    // 1개월봉: 최근 N개월 (연도.월)
-    const months = [];
-    const curr = new Date(now);
-    for (let i = 0; i < count; i++) {
-      months.unshift(new Date(curr));
-      curr.setMonth(curr.getMonth() - 1);
-    }
-    return months.map((d) => ({
-      dateStr: `${d.getFullYear()}년 ${d.getMonth() + 1}월`,
-      label: formatKRXDate(d, 'YY.MM'),
-    }));
-  }
-
-  if (interval === '3개월') {
-    // 3개월(분기)봉: 분기별 표시
-    const quarters = [];
-    const curr = new Date(now);
-    let year = curr.getFullYear();
-    let q = Math.floor(curr.getMonth() / 3) + 1;
-    for (let i = 0; i < count; i++) {
-      quarters.unshift({ year, q });
-      q--;
-      if (q === 0) {
-        q = 4;
-        year--;
-      }
-    }
-    return quarters.map((item) => ({
-      dateStr: `${item.year}년 ${item.q}분기`,
-      label: `${String(item.year).slice(-2)}.Q${item.q}`,
-    }));
+  if (interval === '3시간') {
+    // 3시간봉: 최근 영업일의 오전(09:00~12:00)과 오후(12:00~15:30)
+    const dayCount = Math.ceil(count / 2);
+    const tradingDays = getRecentTradingDays(dayCount, now);
+    const result = [];
+    tradingDays.forEach((d) => {
+      const dStr = formatKRXDate(d, 'YYYY.MM.DD');
+      const mmdd = formatKRXDate(d, 'MM/DD');
+      result.push({ dateStr: `${dStr} 09:00~12:00`, label: `${mmdd} 09시` });
+      result.push({ dateStr: `${dStr} 12:00~15:30`, label: `${mmdd} 12시` });
+    });
+    return result.slice(-count);
   }
 
   // 분봉 (1분, 5분, 10분, 30분, 1시간)
@@ -286,7 +279,7 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
         <div className="section-heading">
           <CandlestickChart size={18} />
           <strong>주가 차트</strong>
-          <span className="current-interval-badge">{chartInterval} 봉</span>
+          <span className="current-interval-badge">{getIntervalBadgeLabel(chartInterval)}</span>
           <span
             className="chart-active-date-badge"
             style={{
@@ -1412,7 +1405,7 @@ function App() {
                     <span style={{ fontSize: '11px', color: '#8aa1be', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                       <Calendar size={11} /> 기준: <strong style={{ color: '#d8e7fa' }}>{activeCandle?.dateStr || '2026.11.05 (목)'}</strong>
                     </span>
-                    <span style={{ fontSize: '10px', color: '#687e99', fontWeight: 600 }}>{chartInterval} 봉</span>
+                    <span style={{ fontSize: '10px', color: '#687e99', fontWeight: 600 }}>{getIntervalBadgeLabel(chartInterval)}</span>
                   </div>
                   <div className="ohlc-grid">
                     <div className="ohlc-card">
