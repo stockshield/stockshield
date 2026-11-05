@@ -11,7 +11,9 @@ import {
   Check, 
   ChevronDown, 
   CircleHelp, 
+  Clock,
   Clock3, 
+  Calendar,
   Eye, 
   EyeOff, 
   LockKeyhole, 
@@ -94,29 +96,148 @@ const INTERVAL_CONFIGS = {
   '3개월': { count: 48, startRatio: 0.820, waveAmp: 0.024, wickAmp: 0.0070 },
 };
 
-function getIntervalLabels(interval) {
-  switch (interval) {
-    case '1분':
-      return ['09:00', '09:15', '09:30', '09:45', '10:00'];
-    case '5분':
-      return ['09:00', '10:00', '11:00', '12:30', '14:00'];
-    case '10분':
-    case '30분':
-    case '1일':
-      return ['09:00', '10:30', '12:00', '13:30', '15:30'];
-    case '1시간':
-      return ['09:00', '11:00', '13:00', '15:00', '15:30'];
-    case '3시간':
-      return ['1일차', '2일차', '3일차', '4일차', '5일차'];
-    case '1주':
-      return ['1주차', '2주차', '3주차', '4주차', '5주차'];
-    case '1개월':
-      return ['1개월전', '3주전', '2주전', '1주전', '현재'];
-    case '3개월':
-      return ['3개월전', '2개월전', '1개월전', '2주전', '현재'];
-    default:
-      return ['09:00', '10:30', '12:00', '13:30', '15:30'];
+// KRX 영업일(주말 제외) 및 일자/시간 포맷터
+function formatKRXDate(d, fmt = 'MM/DD') {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const yy = String(yyyy).slice(-2);
+  const days = ['일', '월', '화', '수', '목', '금', '토'];
+  const dayName = days[d.getDay()];
+
+  if (fmt === 'YYYY.MM.DD') return `${yyyy}.${mm}.${dd}`;
+  if (fmt === 'YYYY.MM.DD (DAY)') return `${yyyy}.${mm}.${dd} (${dayName})`;
+  if (fmt === 'YY.MM') return `${yy}.${mm}`;
+  if (fmt === 'YYYY.MM') return `${yyyy}.${mm}`;
+  return `${mm}/${dd}`;
+}
+
+// 직전 N개의 KRX 영업일(주말 제외) 배열 생성 (과거 -> 현재 순서)
+function getRecentTradingDays(count, endDate = new Date()) {
+  const days = [];
+  const curr = new Date(endDate);
+  while (days.length < count) {
+    const dayOfWeek = curr.getDay();
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+      days.unshift(new Date(curr));
+    }
+    curr.setDate(curr.getDate() - 1);
   }
+  return days;
+}
+
+// 각 주기(일봉, 주봉, 월봉, 분봉)별 캔들 타임스탬프 및 X축 라벨 생성
+function generateCandleTimestamps(interval, count) {
+  const now = new Date();
+
+  if (interval === '1일') {
+    // 1일봉: 실제 최근 N개 KRX 영업일 (정확한 일자: 09/03, 10/15, 11/05 등)
+    const tradingDays = getRecentTradingDays(count, now);
+    return tradingDays.map((d) => ({
+      dateStr: formatKRXDate(d, 'YYYY.MM.DD (DAY)'),
+      label: formatKRXDate(d, 'MM/DD'),
+    }));
+  }
+
+  if (interval === '3시간') {
+    // 3시간봉: 최근 영업일의 오전(09:00~12:00)과 오후(12:00~15:30)
+    const dayCount = Math.ceil(count / 2);
+    const tradingDays = getRecentTradingDays(dayCount, now);
+    const result = [];
+    tradingDays.forEach((d) => {
+      const dStr = formatKRXDate(d, 'YYYY.MM.DD');
+      const mmdd = formatKRXDate(d, 'MM/DD');
+      result.push({ dateStr: `${dStr} 09:00~12:00`, label: `${mmdd} 09시` });
+      result.push({ dateStr: `${dStr} 12:00~15:30`, label: `${mmdd} 12시` });
+    });
+    return result.slice(-count);
+  }
+
+  if (interval === '1주') {
+    // 1주봉: 최근 N개 주의 시작일(월요일)
+    const weeks = [];
+    const curr = new Date(now);
+    const day = curr.getDay();
+    const diff = curr.getDate() - day + (day === 0 ? -6 : 1);
+    curr.setDate(diff);
+    for (let i = 0; i < count; i++) {
+      weeks.unshift(new Date(curr));
+      curr.setDate(curr.getDate() - 7);
+    }
+    return weeks.map((d) => {
+      const endOfWeek = new Date(d);
+      endOfWeek.setDate(d.getDate() + 4);
+      return {
+        dateStr: `${formatKRXDate(d, 'YYYY.MM.DD')} ~ ${formatKRXDate(endOfWeek, 'MM.DD')} 주차`,
+        label: formatKRXDate(d, 'YY.MM'),
+      };
+    });
+  }
+
+  if (interval === '1개월') {
+    // 1개월봉: 최근 N개월 (연도.월)
+    const months = [];
+    const curr = new Date(now);
+    for (let i = 0; i < count; i++) {
+      months.unshift(new Date(curr));
+      curr.setMonth(curr.getMonth() - 1);
+    }
+    return months.map((d) => ({
+      dateStr: `${d.getFullYear()}년 ${d.getMonth() + 1}월`,
+      label: formatKRXDate(d, 'YY.MM'),
+    }));
+  }
+
+  if (interval === '3개월') {
+    // 3개월(분기)봉: 분기별 표시
+    const quarters = [];
+    const curr = new Date(now);
+    let year = curr.getFullYear();
+    let q = Math.floor(curr.getMonth() / 3) + 1;
+    for (let i = 0; i < count; i++) {
+      quarters.unshift({ year, q });
+      q--;
+      if (q === 0) {
+        q = 4;
+        year--;
+      }
+    }
+    return quarters.map((item) => ({
+      dateStr: `${item.year}년 ${item.q}분기`,
+      label: `${String(item.year).slice(-2)}.Q${item.q}`,
+    }));
+  }
+
+  // 분봉 (1분, 5분, 10분, 30분, 1시간)
+  const todayStr = formatKRXDate(now, 'YYYY.MM.DD');
+  let stepMinutes = 1;
+  if (interval === '5분') stepMinutes = 5;
+  else if (interval === '10분') stepMinutes = 10;
+  else if (interval === '30분') stepMinutes = 30;
+  else if (interval === '1시간') stepMinutes = 60;
+
+  const endHour = 15;
+  const endMinute = 30;
+  const endTotalMin = endHour * 60 + endMinute;
+
+  return Array.from({ length: count }, (_, i) => {
+    const totalMin = Math.max(9 * 60, endTotalMin - (count - 1 - i) * stepMinutes);
+    const hh = String(Math.floor(totalMin / 60)).padStart(2, '0');
+    const mm = String(totalMin % 60).padStart(2, '0');
+    return {
+      dateStr: `${todayStr} ${hh}:${mm}`,
+      label: `${hh}:${mm}`,
+    };
+  });
+}
+
+function getIntervalLabels(interval, candles = []) {
+  if (!candles || candles.length === 0) {
+    return ['09:00', '10:30', '12:00', '13:30', '15:30'];
+  }
+  const n = candles.length;
+  const indices = [0, Math.floor(n * 0.25), Math.floor(n * 0.5), Math.floor(n * 0.75), n - 1];
+  return indices.map((idx) => candles[idx]?.label || '');
 }
 
 function buildCandles(seed, interval, currentPrice) {
@@ -127,6 +248,8 @@ function buildCandles(seed, interval, currentPrice) {
     ? seed * 37
     : String(seed || '005930').split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
   let p = base * startRatio;
+  const timestamps = generateCandleTimestamps(interval, count);
+
   return Array.from({ length: count }, (_, i) => {
     const wave = (Math.sin(i * 1.73 + hash * 0.3) * 0.6 + Math.cos(i * 0.58 + hash) * 0.4) * waveAmp;
     const drift = ((base - p) / Math.max(1, count - i)) * 0.65;
@@ -135,7 +258,16 @@ function buildCandles(seed, interval, currentPrice) {
     const high = Math.max(open, close) + base * (wickAmp + (Math.sin(i * 3.2) + 1) * (wickAmp * 0.6));
     const low = Math.min(open, close) - base * (wickAmp * 0.8 + (Math.cos(i * 2.1) + 1) * (wickAmp * 0.5));
     p = close;
-    return { open, close, high, low, volume: 30 + Math.abs(Math.sin(i * 2.7)) * 75 };
+    const ts = timestamps[i] || { dateStr: '', label: '' };
+    return {
+      open,
+      close,
+      high,
+      low,
+      volume: 30 + Math.abs(Math.sin(i * 2.7)) * 75,
+      dateStr: ts.dateStr,
+      label: ts.label,
+    };
   });
 }
 
@@ -155,6 +287,25 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
           <CandlestickChart size={18} />
           <strong>주가 차트</strong>
           <span className="current-interval-badge">{chartInterval} 봉</span>
+          <span
+            className="chart-active-date-badge"
+            style={{
+              fontSize: '11px',
+              color: '#9cb3d0',
+              background: 'rgba(34, 48, 68, 0.75)',
+              border: '1px solid #2d3d52',
+              padding: '2px 9px',
+              borderRadius: '5px',
+              fontWeight: 600,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+            }}
+            title="현재 선택 또는 호버된 캔들의 기준 일자 및 시간"
+          >
+            <Clock size={11} />
+            {hover !== null && candles[hover] ? candles[hover].dateStr : (candles.at(-1)?.dateStr || '2026.11.05')}
+          </span>
         </div>
         <div className="intervals" role="tablist" aria-label="차트 주기 선택">
           <div className="interval-group">
@@ -218,7 +369,7 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
             const bodyTop = Math.min(y(c.open), y(c.close));
             const bodyH = Math.max(1.7, Math.abs(y(c.open) - y(c.close)));
             return (
-              <g key={i} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
+              <g key={i} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} style={{ cursor: 'crosshair' }}>
                 <line x1={x} x2={x} y1={y(c.high)} y2={y(c.low)} stroke={cColor} strokeWidth="1.5" />
                 <rect x={x - step * 0.27} y={bodyTop} width={step * 0.54} height={bodyH} rx=".7" fill={cColor} />
                 <rect
@@ -233,12 +384,45 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
               </g>
             );
           })}
+          {/* 호버 시 십자 가이드라인 및 날짜 배지 */}
+          {hover !== null && candles[hover] && (
+            <g pointerEvents="none">
+              <line
+                x1={left + hover * step + step / 2}
+                x2={left + hover * step + step / 2}
+                y1={top}
+                y2={volumeBottom}
+                stroke="#63a7ff"
+                strokeWidth="1"
+                strokeDasharray="2 3"
+                opacity="0.8"
+              />
+              <rect
+                x={Math.max(left, Math.min(W - right - 76, left + hover * step + step / 2 - 38))}
+                y={H - 18}
+                width="76"
+                height="15"
+                rx="3"
+                fill="#2e6bd6"
+              />
+              <text
+                x={Math.max(left + 38, Math.min(W - right - 38, left + hover * step + step / 2))}
+                y={H - 6}
+                fontSize="10"
+                fontWeight="700"
+                fill="#ffffff"
+                textAnchor="middle"
+              >
+                {candles[hover].label}
+              </text>
+            </g>
+          )}
           <line x1={left} x2={W - right + 6} y1={lineY} y2={lineY} stroke="#a1b6cf" strokeDasharray="4 4" opacity=".7" />
           <rect x={W - right + 3} y={lineY - 10} width={right - 2} height="20" rx="4" fill="#426782" />
           <text x={W - right + 8} y={lineY + 4} fontSize="11" fill="#fff">
             {won(currentPrice)}
           </text>
-          {getIntervalLabels(chartInterval).map((t, i) => (
+          {getIntervalLabels(chartInterval, candles).map((t, i) => (
             <text
               key={t + i}
               x={left + 35 + ((W - left - right - 80) * i) / 4}
@@ -1224,6 +1408,12 @@ function App() {
                 </div>
                 {/* 당일 시세 OHLC (시/고/저/종) - 종목 개요 우측(옆)에 배치 */}
                 <div className="stock-overview-ohlc">
+                  <div className="ohlc-meta-top" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '5px' }}>
+                    <span style={{ fontSize: '11px', color: '#8aa1be', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                      <Calendar size={11} /> 기준: <strong style={{ color: '#d8e7fa' }}>{activeCandle?.dateStr || '2026.11.05 (목)'}</strong>
+                    </span>
+                    <span style={{ fontSize: '10px', color: '#687e99', fontWeight: 600 }}>{chartInterval} 봉</span>
+                  </div>
                   <div className="ohlc-grid">
                     <div className="ohlc-card">
                       <span className="ohlc-title">시가</span>
