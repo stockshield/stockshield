@@ -207,27 +207,44 @@ function generateCandleTimestamps(interval, count) {
     return result.slice(-count);
   }
 
-  // 분봉 (1분, 5분, 10분, 30분, 1시간)
-  const todayStr = formatKRXDate(now, 'YYYY.MM.DD');
+  // 분봉/시간봉 (1분, 5분, 10분, 30분, 1시간)
   let stepMinutes = 1;
   if (interval === '5분') stepMinutes = 5;
   else if (interval === '10분') stepMinutes = 10;
   else if (interval === '30분') stepMinutes = 30;
   else if (interval === '1시간') stepMinutes = 60;
 
-  const endHour = 15;
-  const endMinute = 30;
-  const endTotalMin = endHour * 60 + endMinute;
+  // 한국거래소(KRX) 정규장(09:00 ~ 15:30) 내의 캔들 시각 슬롯 목록 생성 (오름차순)
+  const daySlots = [];
+  let currMin = 9 * 60 + stepMinutes;
+  while (currMin <= 15 * 60 + 30) {
+    const hh = String(Math.floor(currMin / 60)).padStart(2, '0');
+    const mm = String(currMin % 60).padStart(2, '0');
+    daySlots.push({ hh, mm, totalMin: currMin });
+    currMin += stepMinutes;
+  }
+  // 장 마감(15:30) 종가봉 보장
+  if (daySlots.length === 0 || daySlots[daySlots.length - 1].totalMin !== 15 * 60 + 30) {
+    daySlots.push({ hh: '15', mm: '30', totalMin: 15 * 60 + 30 });
+  }
 
-  return Array.from({ length: count }, (_, i) => {
-    const totalMin = Math.max(9 * 60, endTotalMin - (count - 1 - i) * stepMinutes);
-    const hh = String(Math.floor(totalMin / 60)).padStart(2, '0');
-    const mm = String(totalMin % 60).padStart(2, '0');
-    return {
-      dateStr: `${todayStr} ${hh}:${mm}`,
-      label: `${hh}:${mm}`,
-    };
+  const slotsPerDay = daySlots.length;
+  const daysNeeded = Math.ceil(count / slotsPerDay);
+  const tradingDays = getRecentTradingDays(daysNeeded, now);
+
+  const allSlots = [];
+  tradingDays.forEach((d) => {
+    const dStr = formatKRXDate(d, 'YYYY.MM.DD');
+    const mmdd = formatKRXDate(d, 'MM/DD');
+    daySlots.forEach((slot) => {
+      allSlots.push({
+        dateStr: `${dStr} ${slot.hh}:${slot.mm}`,
+        label: daysNeeded > 1 ? `${mmdd} ${slot.hh}:${slot.mm}` : `${slot.hh}:${slot.mm}`,
+      });
+    });
   });
+
+  return allSlots.slice(-count);
 }
 
 function getIntervalLabels(interval, candles = []) {
@@ -434,6 +451,16 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
         <div className="section-heading">
           <CandlestickChart size={18} />
           <strong>주가 차트</strong>
+          <div className="chart-help-wrap">
+            <button type="button" className="chart-help-btn" aria-label="시세 기준 안내" title="시세 기준 안내">
+              <CircleHelp size={15} />
+            </button>
+            <div className="chart-help-tooltip">
+              {stock?.source === 'KIS'
+                ? '실시간 KIS 현재가 기준으로 스케일된 캔들 차트입니다.'
+                : '실제 투자 데이터가 아닌 디자인용 시세입니다.'}
+            </div>
+          </div>
           <span className="current-interval-badge">{getIntervalBadgeLabel(chartInterval)}</span>
           <span
             className="chart-active-date-badge"
@@ -474,84 +501,44 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
           )}
         </div>
 
-        <div className="chart-head-controls">
-          <div className="intervals" role="tablist" aria-label="차트 주기 선택">
-            <div className="interval-group">
-              {['1분', '5분', '10분', '30분'].map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  className={chartInterval === item ? 'selected' : ''}
-                  onClick={() => { setHover(null); setChartInterval(item); }}
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
-            <span className="interval-divider" />
-            <div className="interval-group">
-              {['1시간', '3시간'].map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  className={chartInterval === item ? 'selected' : ''}
-                  onClick={() => { setHover(null); setChartInterval(item); }}
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
-            <span className="interval-divider" />
-            <div className="interval-group">
-              {['1일', '1주', '1개월', '3개월'].map((item) => (
-                <button
-                  key={item}
-                  type="button"
-                  className={chartInterval === item ? 'selected' : ''}
-                  onClick={() => { setHover(null); setChartInterval(item); }}
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="chart-tools-group">
-            <button
-              type="button"
-              className="chart-tool-btn"
-              onClick={() => setZoomCount((prev) => Math.max(16, prev - 6))}
-              title="차트 확대 (캔들 크게 보기)"
-            >
-              <ZoomIn size={13} />
-            </button>
-            <button
-              type="button"
-              className="chart-tool-btn"
-              onClick={() => setZoomCount((prev) => Math.min(candles.length, prev + 6))}
-              title="차트 축소 (캔들 작게 전체 보기)"
-            >
-              <ZoomOut size={13} />
-            </button>
-            {isViewCustomized && (
+        <div className="intervals" role="tablist" aria-label="차트 주기 선택">
+          <div className="interval-group">
+            {['1분', '5분', '10분', '30분'].map((item) => (
               <button
+                key={item}
                 type="button"
-                className="chart-tool-btn reset-btn"
-                onClick={handleResetView}
-                title="최신 시세 및 기본 배율(45개)로 리셋"
+                className={chartInterval === item ? 'selected' : ''}
+                onClick={() => { setHover(null); setChartInterval(item); }}
               >
-                <RotateCcw size={12} /> 최신으로
+                {item}
               </button>
-            )}
-            <button
-              type="button"
-              className={`chart-tool-btn fullscreen-btn ${isFullscreen ? 'active' : ''}`}
-              onClick={() => setIsFullscreen(!isFullscreen)}
-              title={isFullscreen ? '전체화면 닫기 (ESC)' : '전체화면 확대 보기'}
-            >
-              {isFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-              <span>{isFullscreen ? '닫기 (ESC)' : '전체화면'}</span>
-            </button>
+            ))}
+          </div>
+          <span className="interval-divider" />
+          <div className="interval-group">
+            {['1시간', '3시간'].map((item) => (
+              <button
+                key={item}
+                type="button"
+                className={chartInterval === item ? 'selected' : ''}
+                onClick={() => { setHover(null); setChartInterval(item); }}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+          <span className="interval-divider" />
+          <div className="interval-group">
+            {['1일', '1주', '1개월', '3개월'].map((item) => (
+              <button
+                key={item}
+                type="button"
+                className={chartInterval === item ? 'selected' : ''}
+                onClick={() => { setHover(null); setChartInterval(item); }}
+              >
+                {item}
+              </button>
+            ))}
           </div>
         </div>
       </div>
@@ -676,16 +663,52 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
       </div>
 
       <div className="chart-footer">
-        <span><span className="dot red" /> 상승</span>
-        <span><span className="dot blue" /> 하락</span>
-        <span className="chart-guide-pill">
-          <MoveHorizontal size={11} /> 드래그: 과거/현재 이동 · 마우스 휠: 확대/축소
-        </span>
-        <span className="muted push">
-          {stock?.source === 'KIS'
-            ? '실시간 KIS 현재가 기준으로 스케일된 캔들 차트입니다.'
-            : '실제 투자 데이터가 아닌 디자인용 시세입니다.'}
-        </span>
+        <div className="chart-footer-left">
+          <span><span className="dot red" /> 상승</span>
+          <span><span className="dot blue" /> 하락</span>
+          <span className="chart-guide-pill">
+            <MoveHorizontal size={11} /> 드래그: 과거/현재 이동 · 마우스 휠: 확대/축소
+          </span>
+        </div>
+
+        {/* 사용자 지정 위치: 기존 "실시간 KIS..." 자리에 차트 조절 버튼들(+ - 최신으로 전체화면) 배치 */}
+        <div className="chart-tools-group">
+          <button
+            type="button"
+            className="chart-tool-btn"
+            onClick={() => setZoomCount((prev) => Math.max(16, prev - 6))}
+            title="차트 확대 (캔들 크게 보기)"
+          >
+            <ZoomIn size={13} /> 확대
+          </button>
+          <button
+            type="button"
+            className="chart-tool-btn"
+            onClick={() => setZoomCount((prev) => Math.min(candles.length, prev + 6))}
+            title="차트 축소 (캔들 작게 전체 보기)"
+          >
+            <ZoomOut size={13} /> 축소
+          </button>
+          {isViewCustomized && (
+            <button
+              type="button"
+              className="chart-tool-btn reset-btn"
+              onClick={handleResetView}
+              title="최신 시세 및 기본 배율(45개)로 리셋"
+            >
+              <RotateCcw size={12} /> 최신으로
+            </button>
+          )}
+          <button
+            type="button"
+            className={`chart-tool-btn fullscreen-btn ${isFullscreen ? 'active' : ''}`}
+            onClick={() => setIsFullscreen(!isFullscreen)}
+            title={isFullscreen ? '전체화면 닫기 (ESC)' : '전체화면 확대 보기'}
+          >
+            {isFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+            <span>{isFullscreen ? '닫기 (ESC)' : '전체화면'}</span>
+          </button>
+        </div>
       </div>
     </div>
   );
