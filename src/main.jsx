@@ -266,7 +266,7 @@ function buildCandles(seed, interval, currentPrice) {
 
 function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, setHover }) {
   const currentPrice = stock?.price || 70000;
-  const W = 890, H = 295, left = 16, right = 76, top = 14, chartBottom = 208, volumeTop = 228, volumeBottom = 268;
+  const W = 890, H = 310, left = 16, right = 76, top = 14, chartBottom = 208, volumeTop = 228, volumeBottom = 266;
   const high = Math.max(...candles.map((c) => c.high)) * 1.003;
   const low = Math.min(...candles.map((c) => c.low)) * 0.997;
   const y = (p) => top + ((high - p) / (high - low)) * (chartBottom - top);
@@ -377,30 +377,52 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
               </g>
             );
           })}
-          {/* 호버 시 십자 가이드라인 및 날짜 배지 */}
+          <line x1={left} x2={W - right + 6} y1={lineY} y2={lineY} stroke="#a1b6cf" strokeDasharray="4 4" opacity=".7" />
+          <rect x={W - right + 3} y={lineY - 10} width={right - 2} height="20" rx="4" fill="#426782" />
+          <text x={W - right + 8} y={lineY + 4} fontSize="11" fill="#fff">
+            {won(currentPrice)}
+          </text>
+          {/* 하단 X축 구분 보조선 */}
+          <line x1={left} x2={W - right} y1={270} y2={270} stroke="#1b2533" strokeWidth="1" />
+          {/* 상단 행: 차트 기준 시간 라벨 (X축) */}
+          {getIntervalLabels(chartInterval, candles).map((t, i) => (
+            <text
+              key={t + i}
+              x={left + 35 + ((W - left - right - 80) * i) / 4}
+              y={283}
+              fontSize="11"
+              textAnchor="middle"
+              fill="#74859a"
+            >
+              {t}
+            </text>
+          ))}
+          {/* 하단 행: 커서 호버 시 시간 배지 (위의 기준 시간과 겹치지 않도록 살짝 아래로 내려서 배치) */}
           {hover !== null && candles[hover] && (
             <g pointerEvents="none">
               <line
                 x1={left + hover * step + step / 2}
                 x2={left + hover * step + step / 2}
                 y1={top}
-                y2={volumeBottom}
+                y2={291}
                 stroke="#63a7ff"
                 strokeWidth="1"
                 strokeDasharray="2 3"
-                opacity="0.8"
+                opacity="0.85"
               />
               <rect
-                x={Math.max(left, Math.min(W - right - 76, left + hover * step + step / 2 - 38))}
-                y={H - 18}
-                width="76"
-                height="15"
-                rx="3"
-                fill="#2e6bd6"
+                x={Math.max(left, Math.min(W - right - 78, left + hover * step + step / 2 - 39))}
+                y={291}
+                width="78"
+                height="16"
+                rx="4"
+                fill="#2563eb"
+                stroke="#3b82f6"
+                strokeWidth="1"
               />
               <text
-                x={Math.max(left + 38, Math.min(W - right - 38, left + hover * step + step / 2))}
-                y={H - 6}
+                x={Math.max(left + 39, Math.min(W - right - 39, left + hover * step + step / 2))}
+                y={303}
                 fontSize="10"
                 fontWeight="700"
                 fill="#ffffff"
@@ -410,23 +432,6 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
               </text>
             </g>
           )}
-          <line x1={left} x2={W - right + 6} y1={lineY} y2={lineY} stroke="#a1b6cf" strokeDasharray="4 4" opacity=".7" />
-          <rect x={W - right + 3} y={lineY - 10} width={right - 2} height="20" rx="4" fill="#426782" />
-          <text x={W - right + 8} y={lineY + 4} fontSize="11" fill="#fff">
-            {won(currentPrice)}
-          </text>
-          {getIntervalLabels(chartInterval, candles).map((t, i) => (
-            <text
-              key={t + i}
-              x={left + 35 + ((W - left - right - 80) * i) / 4}
-              y={H - 7}
-              fontSize="11"
-              textAnchor="middle"
-              fill="#788799"
-            >
-              {t}
-            </text>
-          ))}
         </svg>
       </div>
       <div className="chart-footer">
