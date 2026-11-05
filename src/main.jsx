@@ -664,8 +664,8 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
 
       <div className="chart-footer">
         <div className="chart-footer-left">
-          <span><span className="dot red" /> 상승</span>
-          <span><span className="dot blue" /> 하락</span>
+          <span className="legend-item"><span className="dot red" /> 상승</span>
+          <span className="legend-item"><span className="dot blue" /> 하락</span>
           <span className="chart-guide-pill">
             <MoveHorizontal size={11} /> 드래그: 과거/현재 이동 · 마우스 휠: 확대/축소
           </span>
