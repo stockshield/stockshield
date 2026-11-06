@@ -1,0 +1,119 @@
+# StockShield 로컬 개발용 인프라 (PostgreSQL · Redis · Kafka)
+# 실행: docker compose -f infra/docker-compose.yml up -d
+# 버전은 요구사항 명세서 SYS_ENV_001 기준으로 고정한다. latest 태그는 쓰지 않는다.
+name: stockshield
+
+services:
+  postgres:
+    image: postgres:15.19
+    container_name: stockshield-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?infra/.env 에 POSTGRES_DB 를 설정하세요}
+      POSTGRES_USER: ${POSTGRES_USER:?infra/.env 에 POSTGRES_USER 를 설정하세요}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?infra/.env 에 POSTGRES_PASSWORD 를 설정하세요}
+      TZ: Asia/Seoul
+      PGTZ: Asia/Seoul
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.2.17
+    container_name: stockshield-redis
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?infra/.env 에 REDIS_PASSWORD 를 설정하세요}"]
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+      TZ: Asia/Seoul
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Kafka 브로커 1대 (KRaft 모드, Zookeeper 없음). 실시간 시세와 주문 기록을 FDS 서버로 전달한다.
+  # - 컨테이너끼리는 kafka:29092, 내 PC에서 실행하는 앱은 localhost:9092 로 접속한다.
+  # - 메시지는 24시간 보관한다. 메인 서버가 잠깐 꺼져도 다시 켜지면 이어서 읽을 수 있다.
+  kafka:
+    image: apache/kafka:3.7.2
+    container_name: stockshield-kafka
+    environment:
+      # KRaft 클러스터 ID: base64로 인코딩한 UUID(22자) 형식이어야 한다. 로컬 개발용 고정값.
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:${KAFKA_PORT:-9092}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_HEAP_OPTS: "-Xms512m -Xmx512m"
+      TZ: Asia/Seoul
+    ports:
+      - "127.0.0.1:${KAFKA_PORT:-9092}:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:29092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 15s
+    restart: unless-stopped
+
+  # 처음 한 번 토픽 3개를 만든다. 이미 있으면 그대로 두고 끝난다. (docs/contracts/kafka-topics.md)
+  # - market.tick      : 실시간 체결 (시세 수집기 → FDS 서버)
+  # - market.orderbook : 실시간 호가 (시세 수집기 → FDS 서버)
+  # - order.log        : 사용자 주문 기록 (코어뱅킹 → FDS 서버)
+  kafka-init:
+    image: apache/kafka:3.7.2
+    container_name: stockshield-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        for topic in market.tick market.orderbook order.log; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 \
+            --create --if-not-exists --topic "$$topic" --partitions 3 --replication-factor 1 \
+            --config retention.ms=86400000
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --describe --topic "$$topic"
+        done
+    restart: "no"
+
+  # (선택) 웹 화면에서 토픽과 메시지를 확인하는 도구. 필요할 때만 --profile tools 로 띄운다.
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    container_name: stockshield-kafka-ui
+    profiles: ["tools"]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: stockshield-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+    ports:
+      - "127.0.0.1:${KAFKA_UI_PORT:-8085}:8080"
+
+volumes:
+  postgres-data:
+  redis-data:
