@@ -1,0 +1,17 @@
+{
+  "v": 1,
+  "eventId": "6f1c2b0e-8d4a-4c1e-9a77-3b2f1d0e5a10",
+  "ordNo": "20261110000123",
+  "mbrNo": 42,
+  "acntNo": "5501-0042",
+  "tckCd": "005930",
+  "side": "BUY",
+  "qty": 10,
+  "prc": 71200,
+  "result": "FILLED",
+  "safeMode": true,
+  "fdsAck": false,
+  "ip": "203.0.113.7",
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36",
+  "ts": "2026-11-10T10:00:02.010+09:00"
+}
