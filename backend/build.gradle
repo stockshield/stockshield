@@ -1,0 +1,69 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.3.5'
+    id 'io.spring.dependency-management' version '1.1.6'
+}
+
+group = 'com.stockshield'
+version = '0.0.1-SNAPSHOT'
+
+// SYS_ENV_001: Java 17 고정 (Gradle Toolchain)
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+// Spring Boot 3.3.5가 관리하는 Testcontainers(1.19.x)는 Docker API 1.32로 접속하는데,
+// 최신 Docker Desktop(엔진 29 이상)은 1.40 미만 요청을 거절한다. 1.21.4부터 API 1.44로 접속한다.
+ext['testcontainers.version'] = '1.21.4'
+
+dependencies {
+    // 웹 · 입력 검증
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+
+    // DB: JPA + PostgreSQL, 스키마는 Flyway SQL로 관리 (SYS_ENV_001 #10)
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.flywaydb:flyway-core'
+    implementation 'org.flywaydb:flyway-database-postgresql'
+    runtimeOnly 'org.postgresql:postgresql'
+
+    // 시세 캐시 · 인증 코드 (Redis)
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+
+    // FDS·시세 파트가 쓰는 의존성 (연결 합의서: build.gradle은 처음부터 넣어 둔다)
+    implementation 'org.springframework.kafka:spring-kafka'
+    implementation 'org.springframework.boot:spring-boot-starter-mail'
+    implementation 'org.springframework.boot:spring-boot-starter-websocket'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    // 테스트: 실제 PostgreSQL 15.19 컨테이너에서 검증 (TRD_LED_001 테스트)
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:postgresql'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    // SYS_ENV_001 #9: 시간대 Asia/Seoul 고정
+    jvmArgs '-Duser.timezone=Asia/Seoul'
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+        exceptionFormat 'full'
+    }
+}
