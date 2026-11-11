@@ -1,0 +1,46 @@
+# 비밀값은 저장소에 두지 않는다 (SYS_SEC_001 #2).
+# 로컬 실행 시 infra/.env 값을 읽는다. backend/ 에서 실행하면 ../infra/.env, 저장소 루트에서 실행하면 ./infra/.env
+spring:
+  application:
+    name: stockshield
+  config:
+    import: optional:file:../infra/.env[.properties],optional:file:./infra/.env[.properties]
+
+  # 앱(실행) 계정: 감사 테이블은 INSERT만 가능 (SYS_SEC_001 #3, V2 마이그레이션)
+  datasource:
+    url: jdbc:postgresql://localhost:${POSTGRES_PORT:5432}/${POSTGRES_DB:stockshield}
+    username: ${DB_APP_USER:stockshield_app}
+    password: ${DB_APP_PASSWORD}
+
+  # 소유자(마이그레이션) 계정: 테이블·제약·권한은 Flyway SQL로만 바꾼다 (SYS_ENV_001 #10)
+  flyway:
+    url: ${spring.datasource.url}
+    user: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
+    placeholders:
+      appDbUser: ${DB_APP_USER:stockshield_app}
+      appDbPassword: ${DB_APP_PASSWORD}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate   # 엔티티와 스키마가 맞는지만 확인 (SYS_ENV_001 #10)
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: Asia/Seoul
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 200ms       # SYS_CORE_001 설정: Redis 호출 타임아웃 200ms
+
+  jackson:
+    time-zone: Asia/Seoul
+
+# 로그 한 줄마다 거래추적번호를 남긴다 (SYS_SEC_001 #6)
+logging:
+  pattern:
+    level: "%5p [%X{traceId:-}]"
