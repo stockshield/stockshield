@@ -41,4 +41,4 @@ cd backend
 | `com.stockshield.common` | Clock, JPA Auditing, 거래추적번호, 공통 에러 응답 |
 | `com.stockshield.fds` | FDS (윤제정 담당) |
 
-문서에 없는 결정은 `docs/decisions.md`에 남긴다.
+문서에 없는 결정과 문서와 다르게 승인한 동작은 저장소에 두지 않고 팀 문서 수정 목록으로 관리한다. 문서는 그 목록으로 한꺼번에 고친다.
