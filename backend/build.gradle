@@ -46,7 +46,7 @@ dependencies {
     // starter-security는 11/13 SecurityConfig와 함께 넣는다(먼저 넣으면 기본 보안이 켜져 기존 API 테스트가 401)
     implementation 'org.springframework.security:spring-security-crypto'
 
-    // FDS·시세 파트가 쓰는 의존성 (연결 합의서: build.gradle은 처음부터 넣어 둔다)
+    // FDS·시세 파트가 쓰는 의존성 (Kafka 시세 컨슈머, 인증 메일, WebSocket 관제)
     implementation 'org.springframework.kafka:spring-kafka'
     implementation 'org.springframework.boot:spring-boot-starter-mail'
     implementation 'org.springframework.boot:spring-boot-starter-websocket'
@@ -62,12 +62,31 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
-tasks.named('test') {
-    useJUnitPlatform()
+// 모든 테스트 작업의 공통 설정
+tasks.withType(Test).configureEach {
     // SYS_ENV_001 #9: 시간대 Asia/Seoul 고정
     jvmArgs '-Duser.timezone=Asia/Seoul'
     testLogging {
         events 'passed', 'skipped', 'failed'
         exceptionFormat 'full'
     }
+}
+
+// PR마다 도는 전체 테스트(ci.yml). 공격 시나리오는 fdsScenarioTest로 따로 돈다
+tasks.named('test') {
+    useJUnitPlatform {
+        excludeTags 'fds-scenario'
+    }
+}
+
+// SYS_DEV_001 #2: FDS 공격 시나리오(@Tag("fds-scenario"))만 실행한다(fds-scenario.yml)
+tasks.register('fdsScenarioTest', Test) {
+    description = 'FDS 공격 시나리오(@Tag("fds-scenario"))만 실행한다'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform {
+        includeTags 'fds-scenario'
+    }
+    shouldRunAfter tasks.named('test')
 }
