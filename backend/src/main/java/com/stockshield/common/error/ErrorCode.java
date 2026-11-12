@@ -19,6 +19,8 @@ public enum ErrorCode {
     // 404
     STOCK_NOT_FOUND(HttpStatus.NOT_FOUND, "찾을 수 없습니다."),
     RESOURCE_NOT_FOUND(HttpStatus.NOT_FOUND, "찾을 수 없습니다."),
+    /** 탐지 기록 없음. 관리자 탐지 조회·확인(조성우)과 AI 재요청(윤제정)이 함께 쓴다 (API 명세서 'API_명세서' 24~26행) */
+    DETECTION_NOT_FOUND(HttpStatus.NOT_FOUND, "찾을 수 없습니다."),
     // 409
     IDEMPOTENCY_KEY_REUSED(HttpStatus.CONFLICT, "같은 요청 키로 다른 내용을 보낼 수 없습니다. 새로 요청해 주세요."),
     ALREADY_CHECKED(HttpStatus.CONFLICT, "이미 처리되었습니다."),
