@@ -42,6 +42,10 @@ dependencies {
     // 시세 캐시 · 인증 코드 (Redis)
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 
+    // 비밀번호·출금 비밀번호 BCrypt (USR_AUTH_001, FDS_WDR_001). 인코더만 쓴다.
+    // starter-security는 11/13 SecurityConfig와 함께 넣는다(먼저 넣으면 기본 보안이 켜져 기존 API 테스트가 401)
+    implementation 'org.springframework.security:spring-security-crypto'
+
     // FDS·시세 파트가 쓰는 의존성 (연결 합의서: build.gradle은 처음부터 넣어 둔다)
     implementation 'org.springframework.kafka:spring-kafka'
     implementation 'org.springframework.boot:spring-boot-starter-mail'
