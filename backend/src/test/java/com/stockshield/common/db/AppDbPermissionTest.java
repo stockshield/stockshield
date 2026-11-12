@@ -81,7 +81,7 @@ class AppDbPermissionTest extends IntegrationTestSupport {
     }
 
     @Test
-    @DisplayName("가격이 없거나 0원인 체결 주문은 DB가 거부한다 (decisions.md #5)")
+    @DisplayName("가격이 없거나 0원인 체결 주문은 DB가 거부한다 (테이블 정의서 orders.ord_prc의 CHECK를 NULL까지 막도록 보완)")
     void filledOrderRequiresPositivePrice() {
         String acntNo = newAccountNo();
         jdbcTemplate.update("INSERT INTO account (acnt_no, mbr_no, init_pkg_cd, init_dps_amt, dps_bal, wdr_pwd) "

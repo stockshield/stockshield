@@ -35,7 +35,8 @@ import jakarta.validation.constraints.NotNull;
  * 공통 에러 응답 형식과 거래추적번호를 확인한다.
  * API 명세서 공통 규칙 1(X-Trace-Id, Retry-After)·2(에러 응답 형식)·3(에러 코드), SYS_SEC_001 #6
  */
-@WebMvcTest
+// controllers를 지정하지 않으면 모든 @Controller가 올라와, 서비스를 주입받는 컨트롤러가 생기면 이 테스트까지 깨진다 (연결 합의서 12절)
+@WebMvcTest(controllers = ErrorResponseFormatTest.ProbeController.class)
 @Import(ErrorResponseFormatTest.ProbeController.class)
 class ErrorResponseFormatTest {
 
