@@ -23,11 +23,11 @@ collector:
   demo-mode: ${DEMO_MODE:false}
   topic: market.tick
   kis:
-    env: ${KIS_ENV:vts}
+    env: ${KIS_ENV:real}
     app-key: ${KIS_APP_KEY:}
     app-secret: ${KIS_APP_SECRET:}
-    rest-url: ${KIS_REST_URL:https://openapivts.koreainvestment.com:29443}
-    ws-url: ${KIS_WS_URL:ws://ops.koreainvestment.com:31000}
+    rest-url: ${KIS_REST_URL:https://openapi.koreainvestment.com:9443}
+    ws-url: ${KIS_WS_URL:ws://ops.koreainvestment.com:21000}
     reconnect-delay: 5s
   # 받은 시세를 JSON Lines 파일로 남겨 장 외 시간 재생에 쓴다 (MKT_TICK_001 #2)
   record:
