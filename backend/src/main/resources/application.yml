@@ -44,6 +44,11 @@ stockshield:
   # 모든 @Scheduled 작업(원장 대사, PENDING 만료 정리, 뉴스 수집)을 켜고 끈다. 테스트에서는 false (연결 합의서 3절)
   scheduling:
     enabled: true
+  # FDS (윤제정 영역, 연결 합의서 3절 설정 키)
+  fds:
+    withdraw:
+      # 대량 출금 기준 금액(원): 1회 또는 24시간 누적(이번 포함)이 이 금액 이상이면 출금 비밀번호 확인 (FDS_WDR_001 #1)
+      large-threshold: 5000000
 
 # 로그 한 줄마다 거래추적번호를 남긴다 (SYS_SEC_001 #6)
 logging:
