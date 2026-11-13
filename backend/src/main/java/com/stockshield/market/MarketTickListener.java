@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.stockshield.fds.risk.StockRiskJudge;
 
 /**
  * 시세 컨슈머 (MKT_TICK_002). Kafka market.tick을 컨슈머 그룹 market-consumer로 읽어
@@ -28,11 +29,16 @@ public class MarketTickListener {
     private final ObjectMapper objectMapper;
     private final PriceCache priceCache;
     private final MinuteBarWriter minuteBars;
+    private final StockRiskJudge riskJudge;
+    private final MarketBroadcaster broadcaster;
 
-    public MarketTickListener(ObjectMapper objectMapper, PriceCache priceCache, MinuteBarWriter minuteBars) {
+    public MarketTickListener(ObjectMapper objectMapper, PriceCache priceCache, MinuteBarWriter minuteBars,
+                              StockRiskJudge riskJudge, MarketBroadcaster broadcaster) {
         this.objectMapper = objectMapper;
         this.priceCache = priceCache;
         this.minuteBars = minuteBars;
+        this.riskJudge = riskJudge;
+        this.broadcaster = broadcaster;
     }
 
     @KafkaListener(topics = TOPIC, groupId = GROUP)
@@ -56,6 +62,12 @@ public class MarketTickListener {
         if (tick.isTick() && tick.currentPrice() != null && tick.currentPrice() > 0) {
             priceCache.putPrice(tick);
             minuteBars.add(tick);
+            try {
+                riskJudge.onTick(tick.code(), tick.currentPrice(), tick.chgRt(), tick.prcTs());
+            } catch (RuntimeException e) {
+                log.warn("위험 의심 판단 실패 tckCd={}: {}", tick.code(), e.getMessage());
+            }
+            broadcaster.onTick(tick);
         } else if (tick.isIndex() && tick.idxVal() != null) {
             priceCache.putIndex(tick);
         } else {
