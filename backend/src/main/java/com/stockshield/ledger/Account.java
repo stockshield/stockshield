@@ -73,6 +73,26 @@ public class Account extends BaseTimeEntity implements Persistable<String> {
         return a;
     }
 
+    public boolean isActive() {
+        return ACTIVE.equals(acntStatCd);
+    }
+
+    // 아래 변경 메서드는 계좌 락을 잡은 트랜잭션 안에서만 부름 (TRD_LED_001 #2)
+
+    public void decreaseDpsBal(long amt) {
+        if (amt <= 0 || dpsBal < amt) {
+            throw new IllegalStateException("예수금을 차감할 수 없습니다 acntNo=" + acntNo);
+        }
+        dpsBal -= amt;
+    }
+
+    public void increaseDpsBal(long amt) {
+        if (amt <= 0) {
+            throw new IllegalStateException("예수금을 늘릴 수 없습니다 acntNo=" + acntNo);
+        }
+        dpsBal = Math.addExact(dpsBal, amt);
+    }
+
     @Override
     public String getId() {
         return acntNo;
