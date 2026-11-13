@@ -14,6 +14,11 @@ public enum ErrorCode {
     AUTH_CODE_MISMATCH(HttpStatus.BAD_REQUEST, "인증 코드가 틀렸습니다."),
     // 401
     UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다."),
+    /**
+     * 로그인 아이디·비밀번호 불일치. 없는 아이디도 같은 응답이다(아이디가 있는지 드러내지 않는다).
+     * UNAUTHORIZED(토큰 없음·만료)와 나눠야 화면이 토큰 재발급으로 잘못 분기하지 않는다 (문서 수정 대기 목록 #13)
+     */
+    LOGIN_FAILED(HttpStatus.UNAUTHORIZED, "아이디 또는 비밀번호가 올바르지 않습니다."),
     // 403 - 권한 부족에만 쓴다
     ACCESS_DENIED(HttpStatus.FORBIDDEN, "접근 권한이 없습니다."),
     // 404
