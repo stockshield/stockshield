@@ -101,7 +101,7 @@ class MarketTickListenerTest extends IntegrationTestSupport {
     void writesIndex() {
         listener.handle(new MarketTick(1, "INDEX", "0001", null, new BigDecimal("2650.31"), null,
                 new BigDecimal("0.42"), null, null, "2026-11-13T12:34:00+09:00", null, "KIS"));
-        assertThat(redis.opsForValue().get("index:0001")).contains("\"idxVal\":2650.31");
+        assertThat(redis.opsForValue().get("index:0001")).contains("\"currentVal\":2650.31");
     }
 
     @Test

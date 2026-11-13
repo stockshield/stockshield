@@ -13,9 +13,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.messaging.simp.SimpMessageSendingOperations;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.GenericContainer;
@@ -55,8 +53,7 @@ class StockRiskJudgeTest extends IntegrationTestSupport {
     @BeforeEach
     void setUp() {
         clock = new MovableClock(open.atZone(ClockConfig.ZONE).toInstant());
-        judge = new StockRiskJudge(redis, objectMapper,
-                new StaticListableBeanFactory().getBeanProvider(SimpMessageSendingOperations.class), clock);
+        judge = new StockRiskJudge(redis, objectMapper, event -> { }, clock);
     }
 
     @Test
