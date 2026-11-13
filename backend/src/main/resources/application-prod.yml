@@ -1,0 +1,7 @@
+# 운영 배포(EC2) 전용 설정. SPRING_PROFILES_ACTIVE=prod로 띄운다.
+spring:
+  flyway:
+    placeholders:
+      # .env의 ADMIN_LGN_ID·ADMIN_EML_ADDR·ADMIN_PWD_HASH가 비어 있으면 V4가 실패해 서버가 뜨지 않는다.
+      # 관리자 없이 V4가 '적용됨'으로 남으면 다시 돌지 않기 때문이다 (USR_AUTH_003 #3)
+      adminRequired: true

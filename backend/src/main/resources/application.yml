@@ -20,6 +20,12 @@ spring:
     placeholders:
       appDbUser: ${DB_APP_USER:stockshield_app}
       appDbPassword: ${DB_APP_PASSWORD}
+      # 최초 관리자 계정 (V4, USR_AUTH_003 #3). 값은 .env에만 둔다(비밀번호는 BCrypt 해시). 셋 다 비면 넣지 않고 넘어가고,
+      # 운영(prod 프로필, application-prod.yml의 adminRequired=true)에서는 마이그레이션이 실패해 서버가 뜨지 않는다
+      adminLgnId: ${ADMIN_LGN_ID:}
+      adminEmlAddr: ${ADMIN_EML_ADDR:}
+      adminPwdHash: ${ADMIN_PWD_HASH:}
+      adminRequired: false
 
   jpa:
     open-in-view: false
@@ -47,6 +53,24 @@ spring:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
+  # 인증 코드 메일 (USR_AUTH_001, FDS_LGN_001). 팀 전용 Gmail 앱 비밀번호는 .env에만 둔다
+  # 메일 서버가 멈춰도 요청 스레드가 묶이지 않게 연결 3초·읽기 5초·쓰기 5초로 끊는다 (SYS_CORE_002 구현방안 '모든 외부 호출에 타임아웃')
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      "[mail.smtp.auth]": true
+      "[mail.smtp.starttls.enable]": true
+      "[mail.smtp.connectiontimeout]": 3000
+      "[mail.smtp.timeout]": 5000
+      "[mail.smtp.writetimeout]": 5000
+
+  # 사용자 계정은 DB(member)와 JWT로만 다룬다. Spring Security가 만드는 기본 사용자(임시 비밀번호)는 만들지 않는다
+  autoconfigure:
+    exclude: org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
+
   jackson:
     time-zone: Asia/Seoul
 
@@ -54,6 +78,16 @@ stockshield:
   # 모든 @Scheduled 작업(원장 대사, PENDING 만료 정리, 뉴스 수집)을 켜고 끈다. 테스트에서는 false (연결 합의서 3절)
   scheduling:
     enabled: true
+  # 시연 모드: true면 주문의 장 운영 시간 검사를 건너뛴다 (MKT_TICK_001 #2, TRD_ORD_001 #2)
+  demo-mode: ${DEMO_MODE:false}
+  # 화면 출처. REST CORS와 WebSocket 허용 Origin이 함께 읽는다 (연결 합의서 3절·8절). 쉼표로 여러 개
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  auth:
+    # JWT 서명 비밀값. 비었거나 32바이트 미만이면 서버가 기동하지 않는다 (SYS_SEC_001 #2)
+    jwt-secret: ${JWT_SECRET:}
+  # 내부 대사 결과 확인 API의 X-Internal-Token. 비어 있으면 그 API는 모든 요청을 401로 거절한다 (연결 합의서 9절)
+  internal-token: ${INTERNAL_TOKEN:}
   # FDS (윤제정 영역, 연결 합의서 3절 설정 키)
   fds:
     withdraw:
