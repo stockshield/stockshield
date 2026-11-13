@@ -7,7 +7,7 @@ import java.time.format.DateTimeFormatter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
-/** 주문번호 채번: 'O' + YYYYMMDD + ord_no_seq 9자리 (테이블 정의서 '공통 규칙' 9행) */
+/** 채번: 주문 'O' + YYYYMMDD + ord_no_seq 9자리, 출금 'W' + YYYYMMDD + wdr_no_seq 9자리 (테이블 정의서 '공통 규칙' 9행) */
 @Component
 public class LedgerNumbers {
 
@@ -22,6 +22,10 @@ public class LedgerNumbers {
     /** 시퀀스 값은 롤백돼도 되돌아가지 않아, 번호가 비어도 겹치지는 않음 */
     public String nextOrdNo() {
         return "O" + today() + String.format("%09d", next("ord_no_seq"));
+    }
+
+    public String nextWdrNo() {
+        return "W" + today() + String.format("%09d", next("wdr_no_seq"));
     }
 
     private String today() {
