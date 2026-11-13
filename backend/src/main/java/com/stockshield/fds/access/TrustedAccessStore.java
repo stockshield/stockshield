@@ -42,6 +42,23 @@ public class TrustedAccessStore {
             ON CONFLICT (mbr_no, conn_ip, dvc_id) DO UPDATE SET last_use_ts = EXCLUDED.last_use_ts
             """;
 
+    /**
+     * 한 회원의 한 IP에 대한 신뢰 접속 요약: 가장 이른 등록 시각과 가입(SIGNUP) 행이 있는지 (합의 15-3).
+     * (IP, 기기) 쌍마다 행이 생기므로 같은 IP 행 전체에서 가장 이른 reg_ts가 그 IP의 첫 인증 시각이다.
+     */
+    private static final String IP_SUMMARY = """
+            SELECT MIN(reg_ts) AS first_reg_ts, BOOL_OR(reg_dv_cd = 'SIGNUP') AS has_signup
+              FROM trusted_access
+             WHERE mbr_no = ? AND conn_ip = ?
+            """;
+
+    /** 그 IP가 신뢰 목록에 없으면 firstRegTs는 null */
+    public record IpSummary(LocalDateTime firstRegTs, boolean hasSignup) {
+        public boolean trusted() {
+            return firstRegTs != null;
+        }
+    }
+
     private final JdbcTemplate jdbcTemplate;
     private final Clock clock;
 
@@ -57,6 +74,11 @@ public class TrustedAccessStore {
     public boolean isKnownDevice(long mbrNo, String dvcId) {
         return dvcId != null
                 && Boolean.TRUE.equals(jdbcTemplate.queryForObject(KNOWN_DEVICE, Boolean.class, mbrNo, dvcId));
+    }
+
+    public IpSummary ipSummary(long mbrNo, String connIp) {
+        return jdbcTemplate.queryForObject(IP_SUMMARY, (rs, n) -> new IpSummary(
+                rs.getObject("first_reg_ts", LocalDateTime.class), rs.getBoolean("has_signup")), mbrNo, connIp);
     }
 
     public void touch(long mbrNo, RequestMeta meta) {
