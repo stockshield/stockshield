@@ -49,6 +49,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
         "spring.kafka.listener.auto-startup=false",
         "spring.datasource.hikari.minimum-idle=2",
         "stockshield.auth.jwt-secret=" + WebMvcSecurityTestConfig.TEST_JWT_SECRET,
+        // 내부 대사 확인 API용. 빈 토큰의 401은 InternalTokenVerifierTest가 컨텍스트 없이 확인함(컨텍스트를 늘리지 않으려고)
+        "stockshield.internal-token=" + IntegrationTestSupport.TEST_INTERNAL_TOKEN,
         // PC의 infra/.env 값이 테스트에 들어오지 않게 한다(CI에는 .env가 없다). 관리자 시드는 AdminSeedMigrationTest가 따로 확인한다
         "spring.flyway.placeholders.adminLgnId=",
         "spring.flyway.placeholders.adminEmlAddr=",
@@ -65,6 +67,7 @@ public abstract class IntegrationTestSupport {
     /** 테스트 회원의 로그인 비밀번호(영문·숫자·특수문자) */
     protected static final String TEST_PASSWORD = "Test1234!";
     protected static final String TEST_WDR_PWD = "246810";
+    protected static final String TEST_INTERNAL_TOKEN = "test-internal-token-0123456789";
     /** MockMvc 요청의 기본 접속 IP */
     protected static final String DEFAULT_IP = "127.0.0.1";
 
