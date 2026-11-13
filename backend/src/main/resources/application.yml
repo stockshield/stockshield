@@ -59,6 +59,13 @@ stockshield:
     withdraw:
       # 대량 출금 기준 금액(원): 1회 또는 24시간 누적(이번 포함)이 이 금액 이상이면 출금 비밀번호 확인 (FDS_WDR_001 #1)
       large-threshold: 5000000
+  # AI 서버 (윤제정 영역, FDS_AI_001). enabled=false는 테스트 전용: 끄면 탐지 사유 설명을 요청하지 않고 REQUESTED로 둔다
+  ai:
+    enabled: ${AI_ENABLED:true}
+    base-url: ${AI_SERVER_URL:http://localhost:8000}
+    # 10초 안에 답이 없으면 실패(FAILED)로 저장 (FDS_AI_001 #4)
+    timeout: 10s
+    connect-timeout: 2s
 
 # 로그 한 줄마다 거래추적번호를 남긴다 (SYS_SEC_001 #6)
 logging:

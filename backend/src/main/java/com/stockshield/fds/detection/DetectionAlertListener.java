@@ -1,7 +1,9 @@
 package com.stockshield.fds.detection;
 
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.slf4j.Logger;
@@ -42,9 +44,24 @@ public class DetectionAlertListener {
         this.jdbcTemplate = jdbcTemplate;
     }
 
+    /** 트랜잭션 밖(만료 정리 작업은 쿼리마다 자동 커밋)에서 발행된 변경도 보낸다 */
     @Async(FdsExecutorConfig.FDS_EXECUTOR)
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void onDetectionChanged(DetectionChangedEvent event) {
+        send(event);
+    }
+
+    /** AI 설명 상태가 바뀐 기록을 DB에서 다시 읽어 보낸다 (FDS_AI_001: 결과를 관제 화면에 전달). 호출한 스레드에서 보낸다 */
+    public void resend(long dtcSeq) {
+        List<DetectionChangedEvent> rows = jdbcTemplate.query(
+                "SELECT rule_cd, rslt_cd, acnt_no, reg_ts FROM fds_detection WHERE dtc_seq = ?",
+                (rs, n) -> new DetectionChangedEvent(dtcSeq, DetectionRule.valueOf(rs.getString("rule_cd")),
+                        DetectionResult.valueOf(rs.getString("rslt_cd")), rs.getString("acnt_no"),
+                        rs.getObject("reg_ts", LocalDateTime.class)), dtcSeq);
+        rows.forEach(this::send);
+    }
+
+    private void send(DetectionChangedEvent event) {
         SimpMessageSendingOperations ops = messaging.getIfAvailable();
         if (ops == null) {
             log.info("탐지 경보(브로커 없음) dtcSeq={} rule={} result={}",
