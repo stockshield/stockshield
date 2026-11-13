@@ -11,7 +11,7 @@ FastAPI + Google Gemini API(무료 등급). 메인 서버만 부르는 내부 AP
 - 판단은 FDS 규칙이 하고, AI는 이유를 쉬운 말로 정리만 합니다.
 - **개인정보:** 회원번호·아이디·계좌번호·IP·기기·요청 해시는 메인 서버가 빼고 보냅니다. AI 서버도 같은 이름의 키를 한 번 더 지웁니다.
 - **실패:** AI를 쓸 수 없으면(키 없음·한도·시간 초과·해석 실패) `500 {"code":"AI_UNAVAILABLE"}`로 응답합니다. 메인 서버는 뉴스는 다음 배치에서 다시 요청하고, 탐지 설명은 `FAILED`로 저장합니다(관리자 재요청 가능).
-- **시간 제한:** Gemini 호출은 8초에 끊습니다(`GEMINI_TIMEOUT_MS`). 메인 서버의 10초 제한 안에 응답하기 위해서입니다.
+- **시간 제한:** AI 서버는 Gemini 응답을 8초까지만 기다립니다(`GEMINI_TIMEOUT_MS`). 메인 서버의 10초 제한 안에 응답하기 위해서입니다. Gemini 요청 자체의 마감은 API 최소값인 10초입니다.
 
 ## 설정
 
@@ -20,8 +20,8 @@ FastAPI + Google Gemini API(무료 등급). 메인 서버만 부르는 내부 AP
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | `GEMINI_API_KEY` | (없음) | Google AI Studio에서 발급. 절대 커밋하지 않습니다 |
-| `GEMINI_MODEL` | `gemini-2.5-flash` | |
-| `GEMINI_TIMEOUT_MS` | `8000` | |
+| `GEMINI_MODEL` | `gemini-3.1-flash-lite` | 응답이 빨라 메인 서버의 10초 제한 안에 들어옴. 더 큰 flash 모델은 11/13 확인 때 13초 넘게 걸려 시간 초과 |
+| `GEMINI_TIMEOUT_MS` | `8000` | AI 서버가 기다리는 시간. Gemini 요청 마감은 API 최소값인 10초로 두고 자동 재시도는 끔 |
 
 ## 실행
 

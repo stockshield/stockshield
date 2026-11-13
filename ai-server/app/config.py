@@ -45,7 +45,7 @@ def load_settings() -> Settings:
 
     return Settings(
         gemini_api_key=get("GEMINI_API_KEY", ""),
-        gemini_model=get("GEMINI_MODEL", "gemini-2.5-flash"),
+        gemini_model=get("GEMINI_MODEL", "gemini-3.1-flash-lite"),
         # 메인 서버는 10초 안에 응답이 없으면 실패로 처리한다(FDS_AI_001 #4). Gemini 호출은 그보다 짧게 끊는다
         gemini_timeout_ms=int(get("GEMINI_TIMEOUT_MS", "8000")),
     )

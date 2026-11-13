@@ -65,9 +65,30 @@ def news_prompt(title: str, content: str, max_chars: int = 6000) -> str:
     return f"[기사 제목]\n{title}\n\n[기사 본문]\n{body}"
 
 
+# 탐지 상세(dtl_data) 필드의 뜻. 모델이 값을 잘못 읽지 않게 함께 보낸다 (FDS ①②③ 탐지 기록 형식)
+FACT_GLOSSARY = {
+    "wdrAmt": "이번 출금 요청 금액(원)",
+    "dailySum": "이번 출금을 뺀 최근 24시간 완료 출금 합계(원). 대량 출금 판단은 dailySum + wdrAmt로 한다",
+    "threshold": "대량 출금 기준 금액(원)",
+    "reason": "판단 사유. SINGLE=1회 금액이 기준 이상, DAILY_SUM=24시간 누적이 기준 이상, "
+              "NEW_IP_AFTER_AUTH=새 IP 인증 후 24시간 안 거래, IP_NOT_TRUSTED=신뢰 목록에 없는 IP의 거래",
+    "pwdProvided": "출금 비밀번호를 함께 보냈는지",
+    "failCntAfter": "이번 요청 뒤 출금 비밀번호 연속 오류 횟수(5회면 잠금)",
+    "newIp": "처음 보는 IP인지",
+    "newDevice": "처음 보는 기기인지",
+    "ipFirstAuthTs": "주문 IP를 처음 인증한 시각",
+    "ordTs": "주문 시각",
+    "trdAmt": "체결 금액(원)",
+    "ordDvCd": "주문 구분(BUY=매수, SELL=매도)",
+    "tckCd": "종목코드",
+}
+
+
 def detection_prompt(rule_cd: str, rslt_cd: str, facts: dict[str, Any]) -> str:
+    glossary = "\n".join(f"- {k}: {v}" for k, v in FACT_GLOSSARY.items() if k in facts)
     return (
         f"[탐지 규칙] {RULE_NAMES.get(rule_cd, rule_cd)}\n"
         f"[결과] {RESULT_NAMES.get(rslt_cd, rslt_cd)}\n"
-        f"[상세 사실(JSON)]\n{json.dumps(facts, ensure_ascii=False, indent=2)}"
+        f"[상세 사실(JSON)]\n{json.dumps(facts, ensure_ascii=False, indent=2)}\n"
+        + (f"[필드 뜻]\n{glossary}" if glossary else "")
     )
