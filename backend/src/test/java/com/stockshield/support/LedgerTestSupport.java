@@ -103,6 +103,27 @@ public abstract class LedgerTestSupport extends IntegrationTestSupport {
         return mockMvc.perform(orderRequest(t, orderBody(tckCd, ordDvCd, ordQty, newKey()))).andReturn();
     }
 
+    /** 받는 은행·계좌는 고정. 출금 비밀번호가 null이면 필드를 넣지 않음 */
+    protected static Map<String, Object> withdrawBody(long wdrAmt, String idmpKey, String wdrPwd) {
+        Map<String, Object> b = new LinkedHashMap<>();
+        b.put("wdrAmt", wdrAmt);
+        b.put("rcvBankNm", "국민은행");
+        b.put("rcvAcntNo", "123-456-789012");
+        b.put("idmpKey", idmpKey);
+        if (wdrPwd != null) {
+            b.put("wdrPwd", wdrPwd);
+        }
+        return b;
+    }
+
+    protected MockHttpServletRequestBuilder withdrawRequest(Trader t, Map<String, Object> body) throws Exception {
+        return post("/api/v1/accounts/me/withdrawals").with(fromIp(t.member().ip()))
+                .header("Authorization", bearer(t.tokens()))
+                .header("X-Device-Id", t.member().deviceId())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json(body));
+    }
+
     // ------------------------------------------------------------------ 원장 조회
 
     protected long dpsBal(String acntNo) {
@@ -121,6 +142,22 @@ public abstract class LedgerTestSupport extends IntegrationTestSupport {
 
     protected int tradeCount(String acntNo) {
         return db.queryForObject("SELECT COUNT(*) FROM trade_history WHERE acnt_no = ?", Integer.class, acntNo);
+    }
+
+    protected int withdrawalCount(String acntNo) {
+        return db.queryForObject("SELECT COUNT(*) FROM withdrawal WHERE acnt_no = ?", Integer.class, acntNo);
+    }
+
+    protected int wdrPwdFailCnt(String acntNo) {
+        return db.queryForObject("SELECT wdr_pwd_fail_cnt FROM account WHERE acnt_no = ?", Integer.class, acntNo);
+    }
+
+    protected String acntStatCd(String acntNo) {
+        return db.queryForObject("SELECT acnt_stat_cd FROM account WHERE acnt_no = ?", String.class, acntNo);
+    }
+
+    protected int detectionCount(String acntNo) {
+        return db.queryForObject("SELECT COUNT(*) FROM fds_detection WHERE acnt_no = ?", Integer.class, acntNo);
     }
 
     /** 원장 정합: 예수금 = 초기 예수금 − 매수 체결금액 + 매도 체결금액 − DONE 출금 (ADM_REC_001 #1) */
