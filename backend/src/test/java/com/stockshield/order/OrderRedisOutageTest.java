@@ -1,6 +1,7 @@
 package com.stockshield.order;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -70,5 +71,26 @@ class OrderRedisOutageTest extends LedgerTestSupport {
                 .andReturn();
         assertThat(content(again)).isEqualTo(content(first));
         assertThat(orderCount(t.acntNo())).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("내 계좌 조회는 시세를 읽을 수 없어도 막지 않는다: 예수금·계좌 상태를 보여 주고 보유 종목은 매입금액으로 평가해 지연으로 표시한다")
+    void accountSummaryStillAnswers() throws Exception {
+        Trader t = newTraderAt(MARKET_OPEN);
+        putPriceNow(SAMSUNG, 70_000);
+        putPriceNow(HYNIX, 50_000);
+        mockMvc.perform(orderRequest(t, orderBody(SAMSUNG, "BUY", 10, newKey()))).andExpect(status().isCreated());
+        mockMvc.perform(orderRequest(t, orderBody(HYNIX, "BUY", 10, newKey()))).andExpect(status().isCreated());
+
+        DockerClientFactory.instance().client().pauseContainerCmd(OWN_REDIS.getContainerId()).exec();
+        paused = true;
+
+        mockMvc.perform(get("/api/v1/accounts/me/summary").header("Authorization", bearer(t.tokens())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.dpsBal").value(8_800_000))
+                .andExpect(jsonPath("$.totalBuyAmt").value(1_200_000))
+                .andExpect(jsonPath("$.totalEvalAmt").value(1_200_000))
+                .andExpect(jsonPath("$.totalPnl").value(0))
+                .andExpect(jsonPath("$.priceDelayed").value(true));
     }
 }

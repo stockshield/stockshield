@@ -129,9 +129,8 @@ class TokenAndAuthorizationTest extends IntegrationTestSupport {
                 .andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
         mockMvc.perform(get("/api/v1/accounts/me/summary").header("Authorization", bearer(admin)))
                 .andExpect(status().isForbidden());
-        // 주문·계좌 API는 PR ②에서 들어온다. 지금은 권한 검사를 통과해 404가 된다
         mockMvc.perform(get("/api/v1/accounts/me/summary").header("Authorization", bearer(user)))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isOk());
     }
 
     @Test
