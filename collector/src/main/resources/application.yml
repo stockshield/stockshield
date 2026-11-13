@@ -1,0 +1,74 @@
+# 시세 수집기 설정. 비밀값(한국투자증권 키)은 infra/.env에서만 읽는다 (SYS_SEC_001 #2)
+# collector/ 에서 실행하면 ../infra/.env, 저장소 루트에서 실행하면 ./infra/.env
+spring:
+  application:
+    name: stockshield-collector
+  config:
+    import: optional:file:../infra/.env[.properties],optional:file:./infra/.env[.properties]
+  main:
+    web-application-type: none
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:${KAFKA_PORT:9092}}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: 1
+      properties:
+        linger.ms: 20
+
+collector:
+  # KIS: 한국투자증권 실시간 체결가, MOCK: 가짜 시세(무작위 변동), REPLAY: 저장한 시세 재생
+  # 비워 두면 DEMO_MODE가 true일 때 REPLAY(파일이 없으면 MOCK), 아니면 KIS
+  mode: ${COLLECTOR_MODE:}
+  demo-mode: ${DEMO_MODE:false}
+  topic: market.tick
+  kis:
+    env: ${KIS_ENV:vts}
+    app-key: ${KIS_APP_KEY:}
+    app-secret: ${KIS_APP_SECRET:}
+    rest-url: ${KIS_REST_URL:https://openapivts.koreainvestment.com:29443}
+    ws-url: ${KIS_WS_URL:ws://ops.koreainvestment.com:31000}
+    reconnect-delay: 5s
+  # 받은 시세를 JSON Lines 파일로 남겨 장 외 시간 재생에 쓴다 (MKT_TICK_001 #2)
+  record:
+    enabled: ${COLLECTOR_RECORD:true}
+    dir: ${COLLECTOR_DATA_DIR:data}
+  replay:
+    file: ${COLLECTOR_REPLAY_FILE:}
+    speed: ${COLLECTOR_REPLAY_SPEED:1.0}
+  # 서비스 대상 30종목: 코스피 시가총액 상위 20 + 코스닥 상위 10 (2026-11-10 종가, 연결 합의서 11절)
+  stocks:
+    - { code: '005930', name: 삼성전자, market: KOSPI }
+    - { code: '000660', name: SK하이닉스, market: KOSPI }
+    - { code: '402340', name: SK스퀘어, market: KOSPI }
+    - { code: '373220', name: LG에너지솔루션, market: KOSPI }
+    - { code: '207940', name: 삼성바이오로직스, market: KOSPI }
+    - { code: '009150', name: 삼성전기, market: KOSPI }
+    - { code: '005380', name: 현대차, market: KOSPI }
+    - { code: '105560', name: KB금융, market: KOSPI }
+    - { code: '032830', name: 삼성생명, market: KOSPI }
+    - { code: '068270', name: 셀트리온, market: KOSPI }
+    - { code: '028260', name: 삼성물산, market: KOSPI }
+    - { code: '055550', name: 신한지주, market: KOSPI }
+    - { code: '000270', name: 기아, market: KOSPI }
+    - { code: '006400', name: 삼성SDI, market: KOSPI }
+    - { code: '034730', name: SK, market: KOSPI }
+    - { code: '012450', name: 한화에어로스페이스, market: KOSPI }
+    - { code: '086790', name: 하나금융지주, market: KOSPI }
+    - { code: '012330', name: 현대모비스, market: KOSPI }
+    - { code: '034020', name: 두산에너빌리티, market: KOSPI }
+    - { code: '035420', name: NAVER, market: KOSPI }
+    - { code: '196170', name: 알테오젠, market: KOSDAQ }
+    - { code: '086520', name: 에코프로, market: KOSDAQ }
+    - { code: '247540', name: 에코프로비엠, market: KOSDAQ }
+    - { code: '036930', name: 주성엔지니어링, market: KOSDAQ }
+    - { code: '277810', name: 레인보우로보틱스, market: KOSDAQ }
+    - { code: '039030', name: 이오테크닉스, market: KOSDAQ }
+    - { code: '000250', name: 삼천당제약, market: KOSDAQ }
+    - { code: '222800', name: 심텍, market: KOSDAQ }
+    - { code: '028300', name: HLB, market: KOSDAQ }
+    - { code: '058470', name: 리노공업, market: KOSDAQ }
+
+logging:
+  level:
+    org.apache.kafka: WARN
