@@ -37,6 +37,16 @@ spring:
       password: ${REDIS_PASSWORD:}
       timeout: 200ms       # SYS_CORE_001 설정: Redis 호출 타임아웃 200ms
 
+  # Kafka: 실시간 시세(market.tick) 수신 전용 (윤제정 영역, 기획서 5장, MKT_TICK_002)
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:${KAFKA_PORT:9092}}
+    consumer:
+      group-id: market-consumer
+      # 다시 켜면 밀린 옛 시세가 아니라 지금 시세부터 읽는다 (주문은 시세 시각으로 지연을 판단)
+      auto-offset-reset: latest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
   jackson:
     time-zone: Asia/Seoul
 
