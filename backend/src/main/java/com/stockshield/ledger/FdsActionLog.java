@@ -64,4 +64,25 @@ public class FdsActionLog extends BaseRegTimeEntity {
         log.actActorDvCd = "SYSTEM";
         return log;
     }
+
+    /** 관리자 탐지 확인. 계좌는 비움('테이블정의서' 180행: 탐지 확인만 할 때 NULL) */
+    public static FdsActionLog check(long dtcSeq, long adminMbrNo, String reason) {
+        return byAdmin("CHECK", dtcSeq, null, adminMbrNo, reason);
+    }
+
+    /** 관리자 잠금(LOCK)·해제(UNLOCK). 탐지는 비움('테이블정의서' 179행: 잠금·해제만 할 때 NULL) */
+    public static FdsActionLog accountStatus(String actDvCd, String acntNo, long adminMbrNo, String reason) {
+        return byAdmin(actDvCd, null, acntNo, adminMbrNo, reason);
+    }
+
+    private static FdsActionLog byAdmin(String actDvCd, Long dtcSeq, String acntNo, long adminMbrNo, String reason) {
+        FdsActionLog log = new FdsActionLog();
+        log.tgtDtcSeq = dtcSeq;
+        log.tgtAcntNo = acntNo;
+        log.actDvCd = actDvCd;
+        log.procMbrNo = adminMbrNo;
+        log.actRsnCont = reason;
+        log.actActorDvCd = "ADMIN";
+        return log;
+    }
 }
