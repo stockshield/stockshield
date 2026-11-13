@@ -88,11 +88,11 @@ public class MarketQueryService {
         Map<String, Object> ranks = new LinkedHashMap<>();
         ranks.put("rise", top(prices, names, Comparator.comparingDouble((JsonNode p) -> p.path("chgRt").asDouble()).reversed()));
         ranks.put("fall", top(prices, names, Comparator.comparingDouble((JsonNode p) -> p.path("chgRt").asDouble())));
-        ranks.put("volume", top(prices, names, Comparator.comparingLong((JsonNode p) -> p.path("accVol").asLong()).reversed()));
+        ranks.put("volume", top(prices, names, Comparator.comparingLong((JsonNode p) -> p.path("totalTrdVol").asLong()).reversed()));
 
         Map<String, Object> s = new LinkedHashMap<>();
-        s.put("kospi", readOne(PriceCache.INDEX_KEY + KOSPI).map(this::toMap).orElse(null));
-        s.put("kosdaq", readOne(PriceCache.INDEX_KEY + KOSDAQ).map(this::toMap).orElse(null));
+        s.put("kospi", readOne(PriceCache.INDEX_KEY + KOSPI).map(MarketQueryService::indexView).orElse(null));
+        s.put("kosdaq", readOne(PriceCache.INDEX_KEY + KOSDAQ).map(MarketQueryService::indexView).orElse(null));
         s.put("topRanks", ranks);
         s.put("riskStocks", delayed ? List.of() : riskList(names));
         s.put("priceDelayed", delayed);
@@ -103,10 +103,12 @@ public class MarketQueryService {
     // ------------------------------------------------------------------ 12행: 종목 상세
 
     public Map<String, Object> detail(String tckCd) {
-        String name = stockNames().get(tckCd);
-        if (name == null) {
+        List<String[]> master = jdbcTemplate.query("SELECT tck_nm, mkt_cd FROM stock_master WHERE tck_cd = ?",
+                (rs, n) -> new String[] {rs.getString("tck_nm"), rs.getString("mkt_cd")}, tckCd);
+        if (master.isEmpty()) {
             throw new ApiException(ErrorCode.STOCK_NOT_FOUND, Map.of("tckCd", tckCd));
         }
+        String name = master.get(0)[0];
         Optional<JsonNode> price = readOne(PriceCache.PRICE_KEY + tckCd);
         Optional<JsonNode> risk = readOne(StockRiskJudge.RISK_KEY + tckCd);
 
@@ -119,10 +121,13 @@ public class MarketQueryService {
         Map<String, Object> d = new LinkedHashMap<>();
         d.put("tckCd", tckCd);
         d.put("tckNm", name);
+        d.put("mktCd", master.get(0)[1]);
         d.put("currentPrice", price.map(p -> p.path("currentPrice").asLong()).orElse(null));
         d.put("chgPrc", price.map(p -> p.path("chgPrc").asLong()).orElse(null));
         d.put("chgRt", price.map(p -> p.path("chgRt").decimalValue()).orElse(null));
+        d.put("totalTrdVol", price.map(p -> p.path("totalTrdVol").asLong()).orElse(null));
         d.put("prcTs", price.map(p -> p.path("prcTs").asText()).orElse(null));
+        d.put("priceDelayed", isDelayed(readAll(PriceCache.PRICE_KEY)));
         d.put("chart", chart(tckCd));
         d.put("risk", riskView);
         return d;
@@ -192,7 +197,7 @@ public class MarketQueryService {
             m.put("currentPrice", p.path("currentPrice").asLong());
             m.put("chgPrc", p.path("chgPrc").asLong());
             m.put("chgRt", p.path("chgRt").decimalValue());
-            m.put("accVol", p.path("accVol").asLong());
+            m.put("totalTrdVol", p.path("totalTrdVol").asLong());
             m.put("riskYn", risky.contains(code) ? "Y" : "N");
             return m;
         }).toList();
@@ -261,9 +266,14 @@ public class MarketQueryService {
         }
     }
 
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> toMap(JsonNode node) {
-        return objectMapper.convertValue(node, Map.class);
+    /** 지수: {currentVal, chgVal, chgRt, prcTs} */
+    private static Map<String, Object> indexView(JsonNode n) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("currentVal", n.path("currentVal").isMissingNode() ? null : n.path("currentVal").decimalValue());
+        m.put("chgVal", n.path("chgVal").isMissingNode() || n.path("chgVal").isNull() ? null : n.path("chgVal").decimalValue());
+        m.put("chgRt", n.path("chgRt").isMissingNode() ? null : n.path("chgRt").decimalValue());
+        m.put("prcTs", n.path("prcTs").asText(null));
+        return m;
     }
 
     private static Map<String, Object> item(String k1, Object v1, String k2, Object v2) {

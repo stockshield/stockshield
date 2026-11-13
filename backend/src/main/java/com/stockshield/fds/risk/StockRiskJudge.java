@@ -16,9 +16,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.messaging.simp.SimpMessageSendingOperations;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -29,7 +28,7 @@ import com.stockshield.fds.risk.ReturnWindow.MinuteReturn;
  * FDS ④ 위험 의심 종목 판단 (FDS_MKT_001). 시세 컨슈머가 체결마다 넘겨주고, 분이 바뀔 때마다 판단한다.
  *
  * - 1분 수익률의 Z-Score가 3 이상(표본 30개 이상, 최근 30분 기준)이거나 전일 대비 등락률이 ±10% 이상이면 위험 의심이다.
- * - 위험 의심이면 Redis risk:stock:{종목코드}(TTL 300초)를 쓰고 /topic/risk로 알린다. 조건이 이어지면 다시 써서
+ * - 위험 의심이면 Redis risk:stock:{종목코드}(TTL 300초)를 쓰고 RiskStocksChanged를 발행한다(화면 전송은 MarketBroadcaster). 조건이 이어지면 다시 써서
  *   마지막으로 맞은 뒤 5분 동안 유지된다(FDS_MKT_001 #3).
  * - 시세가 60초 넘게 갱신되지 않으면 오래된 시세로 잘못 표시하지 않도록 표시를 내린다(#4). 5분이 지나 사라진 표시도
  *   화면이 알 수 있게 riskYn=N으로 알린다(sweep, 10초마다).
@@ -42,7 +41,6 @@ public class StockRiskJudge {
 
     public static final String RISK_KEY = "risk:stock:";
     public static final String STAT_KEY = "stat:ret:";
-    public static final String RISK_TOPIC = "/topic/risk";
     public static final Duration RISK_TTL = Duration.ofMinutes(5);
     public static final Duration STALE_AFTER = Duration.ofSeconds(60);
     static final double Z_LIMIT = 3.0;
@@ -55,7 +53,7 @@ public class StockRiskJudge {
 
     private final StringRedisTemplate redis;
     private final ObjectMapper objectMapper;
-    private final ObjectProvider<SimpMessageSendingOperations> messaging;
+    private final ApplicationEventPublisher events;
     private final Clock clock;
 
     private final Map<String, ReturnWindow> windows = new ConcurrentHashMap<>();
@@ -63,10 +61,10 @@ public class StockRiskJudge {
     private final Set<String> active = ConcurrentHashMap.newKeySet();
 
     public StockRiskJudge(StringRedisTemplate redis, ObjectMapper objectMapper,
-                          ObjectProvider<SimpMessageSendingOperations> messaging, Clock clock) {
+                          ApplicationEventPublisher events, Clock clock) {
         this.redis = redis;
         this.objectMapper = objectMapper;
-        this.messaging = messaging;
+        this.events = events;
         this.clock = clock;
     }
 
@@ -129,7 +127,7 @@ public class StockRiskJudge {
                     continue;
                 }
                 active.remove(tckCd);
-                send(Map.of("tckCd", tckCd, "riskYn", "N"));
+                publish(tckCd, false);
             } catch (RuntimeException e) {
                 log.warn("위험 의심 표시 정리 실패 tckCd={}: {}", tckCd, e.getMessage());
             }
@@ -156,7 +154,7 @@ public class StockRiskJudge {
         try {
             redis.opsForValue().set(RISK_KEY + r.tckCd(), json(v), RISK_TTL);
             active.add(r.tckCd());
-            send(v);
+            publish(r.tckCd(), true);
         } catch (RuntimeException e) {
             log.warn("위험 의심 종목 저장 실패 tckCd={}: {}", r.tckCd(), e.getMessage());
         }
@@ -178,14 +176,11 @@ public class StockRiskJudge {
         }
     }
 
-    private void send(Map<String, Object> payload) {
-        SimpMessageSendingOperations ops = messaging.getIfAvailable();
-        if (ops != null) {
-            try {
-                ops.convertAndSend(RISK_TOPIC, payload);
-            } catch (RuntimeException e) {
-                log.debug("/topic/risk 전송 실패: {}", e.getMessage());
-            }
+    private void publish(String tckCd, boolean riskYn) {
+        try {
+            events.publishEvent(new RiskStocksChanged(tckCd, riskYn));
+        } catch (RuntimeException e) {
+            log.debug("위험 의심 변경 알림 실패: {}", e.getMessage());
         }
     }
 

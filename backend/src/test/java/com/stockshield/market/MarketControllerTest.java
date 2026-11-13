@@ -78,13 +78,13 @@ class MarketControllerTest extends IntegrationTestSupport {
         for (int i = 1; i <= 12; i++) {
             price(String.format("Q%05d", i), 10_000 + i, i - 6, i * 1000L, now());
         }
-        redis.opsForValue().set("index:0001", "{\"idxCd\":\"0001\",\"idxVal\":2650.31,\"chgRt\":0.42,\"prcTs\":\"" + now() + "\"}");
+        redis.opsForValue().set("index:0001", "{\"idxCd\":\"0001\",\"currentVal\":2650.31,\"chgRt\":0.42,\"prcTs\":\"" + now() + "\"}");
         risk("Q00012", "UP", "6", "전일 대비 +10.50%");
 
         mvc.perform(get("/api/v1/market/summary"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.priceDelayed").value(false))
-                .andExpect(jsonPath("$.kospi.idxVal").value(2650.31))
+                .andExpect(jsonPath("$.kospi.currentVal").value(2650.31))
                 .andExpect(jsonPath("$.kosdaq").value(nullValue()))
                 .andExpect(jsonPath("$.topRanks.rise", hasSize(10)))
                 .andExpect(jsonPath("$.topRanks.rise[0].tckCd").value("Q00012"))
@@ -122,6 +122,9 @@ class MarketControllerTest extends IntegrationTestSupport {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.tckNm").value("큐종목2"))
                 .andExpect(jsonPath("$.currentPrice").value(20_500))
+                .andExpect(jsonPath("$.mktCd").value("KOSPI"))
+                .andExpect(jsonPath("$.totalTrdVol").value(5000))
+                .andExpect(jsonPath("$.priceDelayed").value(false))
                 .andExpect(jsonPath("$.chart[*].bsMi", contains("202611130900", "202611130901")))
                 .andExpect(jsonPath("$.chart[0].closePrc").value(20_100))
                 .andExpect(jsonPath("$.risk.riskYn").value("Y"))
@@ -153,7 +156,7 @@ class MarketControllerTest extends IntegrationTestSupport {
 
     private void price(String code, long price, double chgRt, long accVol, String prcTs) {
         redis.opsForValue().set("price:" + code, String.format(java.util.Locale.ROOT,
-                "{\"tckCd\":\"%s\",\"currentPrice\":%d,\"prcTs\":\"%s\",\"chgPrc\":0,\"chgRt\":%.2f,\"accVol\":%d}",
+                "{\"tckCd\":\"%s\",\"currentPrice\":%d,\"prcTs\":\"%s\",\"chgPrc\":0,\"chgRt\":%.2f,\"totalTrdVol\":%d}",
                 code, price, prcTs, chgRt, accVol));
     }
 

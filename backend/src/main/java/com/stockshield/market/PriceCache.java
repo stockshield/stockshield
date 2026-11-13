@@ -16,8 +16,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * - StringRedisTemplate으로 UTF-8 JSON 문자열을 그대로 쓴다. 타입 정보(@class)는 넣지 않는다.
  * - 조성우의 주문·내 계좌는 currentPrice(정수, 원)와 prcTs(메시지의 시세 시각, +09:00)만 읽는다.
  *   prcTs는 Redis에 쓴 시각이 아니라 메시지의 시각이라, Kafka 장애 뒤 밀린 옛 시세로 체결되지 않는다.
- * - 나머지 필드(chgPrc, chgRt, accVol)는 화면용으로 덧붙인다.
- * index:{idxCd} = {"idxCd","idxVal","chgVal","chgRt","prcTs"}
+ * - 나머지 필드(chgPrc, chgRt, totalTrdVol = 누적 거래량)는 화면용으로 덧붙인다.
+ * index:{idxCd} = {"idxCd","currentVal","chgVal","chgRt","prcTs"}
  */
 @Component
 public class PriceCache {
@@ -40,14 +40,14 @@ public class PriceCache {
         v.put("prcTs", t.prcTs());
         v.put("chgPrc", t.chgPrc());
         v.put("chgRt", t.chgRt());
-        v.put("accVol", t.accVol());
+        v.put("totalTrdVol", t.accVol());
         redis.opsForValue().set(PRICE_KEY + t.code(), json(v));
     }
 
     public void putIndex(MarketTick t) {
         Map<String, Object> v = new LinkedHashMap<>();
         v.put("idxCd", t.code());
-        v.put("idxVal", t.idxVal());
+        v.put("currentVal", t.idxVal());
         v.put("chgVal", t.chgPrc());
         v.put("chgRt", t.chgRt());
         v.put("prcTs", t.prcTs());
