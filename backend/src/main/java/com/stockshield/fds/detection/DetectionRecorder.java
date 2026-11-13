@@ -4,6 +4,7 @@ import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -63,6 +64,17 @@ public class DetectionRecorder {
             RETURNING rule_cd, acnt_no, reg_ts
             """;
 
+    /** 새 접속 인증 성공: 아직 PENDING이고 5분 안(reg_ts > 현재 − 5분)일 때만 PASS (합의 9-2) */
+    private static final String CONFIRM_LOGIN = """
+            UPDATE fds_detection
+               SET rslt_cd = 'PASS', mod_ts = ?
+             WHERE dtc_seq = ?
+               AND rule_cd = 'LOGIN_NEW_ACCESS'
+               AND rslt_cd = 'PENDING'
+               AND reg_ts > ?
+            RETURNING mbr_no, conn_ip, dvc_id, user_agt, reg_ts
+            """;
+
     private static final String EXPIRE_PENDING = """
             UPDATE fds_detection
                SET rslt_cd = 'FAIL', mod_ts = ?
@@ -95,7 +107,19 @@ public class DetectionRecorder {
                                Map<String, Object> detail) {
     }
 
+    /** 저장한 탐지 기록의 번호와 저장 시각(reg_ts) */
+    public record Saved(long dtcSeq, LocalDateTime regTs) {
+        /** 인증 대기 만료 시각: reg_ts + 5분 */
+        public LocalDateTime expiresAt() {
+            return regTs.plus(PENDING_TTL);
+        }
+    }
+
     public long insert(NewDetection d) {
+        return save(d).dtcSeq();
+    }
+
+    public Saved save(NewDetection d) {
         LocalDateTime now = now();
         Timestamp ts = Timestamp.valueOf(now);
         Long dtcSeq = jdbcTemplate.queryForObject(INSERT, Long.class,
@@ -106,7 +130,7 @@ public class DetectionRecorder {
             throw new IllegalStateException("탐지 기록 번호를 받지 못했습니다");
         }
         events.publishEvent(new DetectionChangedEvent(dtcSeq, d.rule(), d.result(), d.acntNo(), now));
-        return dtcSeq;
+        return new Saved(dtcSeq, now);
     }
 
     /** 같은 출금 요청의 인증 대기 기록을 FOR NO KEY UPDATE로 잡는다. 없으면 empty */
@@ -133,6 +157,27 @@ public class DetectionRecorder {
                 result.name(), wdrNo, Timestamp.valueOf(now), dtcSeq);
         changed.forEach(events::publishEvent);
         return !changed.isEmpty();
+    }
+
+    /** 로그인 때 저장한 접속 정보. 인증에 성공하면 이 값으로 신뢰 접속을 등록한다 */
+    public record ConfirmedLogin(long mbrNo, String connIp, String dvcId, String userAgt) {
+    }
+
+    /**
+     * 새 접속 인증 성공. PENDING이고 5분 안이면 PASS로 바꾸고 로그인 때 저장한 접속 정보를 돌려준다.
+     * 이미 PENDING이 아니거나 만료됐으면 empty.
+     */
+    public Optional<ConfirmedLogin> confirmLoginPending(long dtcSeq) {
+        LocalDateTime now = now();
+        List<ConfirmedLogin> rows = new ArrayList<>();
+        List<DetectionChangedEvent> changed = jdbcTemplate.query(CONFIRM_LOGIN, (rs, n) -> {
+            rows.add(new ConfirmedLogin(rs.getLong("mbr_no"), rs.getString("conn_ip"),
+                    rs.getString("dvc_id"), rs.getString("user_agt")));
+            return new DetectionChangedEvent(dtcSeq, DetectionRule.LOGIN_NEW_ACCESS, DetectionResult.PASS,
+                    null, rs.getObject("reg_ts", LocalDateTime.class));
+        }, Timestamp.valueOf(now), dtcSeq, Timestamp.valueOf(now.minus(PENDING_TTL)));
+        changed.forEach(events::publishEvent);
+        return rows.stream().findFirst();
     }
 
     /** 5분이 지난 인증 대기 기록을 모두 FAIL로 확정하고, 확정한 건수를 돌려준다 (FDS_LOG_001 #5) */

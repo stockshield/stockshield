@@ -2,6 +2,7 @@ package com.stockshield.fds;
 
 import org.springframework.stereotype.Service;
 
+import com.stockshield.fds.access.LoginAccessChecker;
 import com.stockshield.fds.api.CheckResult;
 import com.stockshield.fds.api.ConfirmResult;
 import com.stockshield.fds.api.FdsService;
@@ -23,34 +24,37 @@ import com.stockshield.fds.withdraw.WithdrawLimitChecker;
 @Service
 public class FdsServiceImpl implements FdsService {
 
+    private final LoginAccessChecker loginAccessChecker;
     private final WithdrawLimitChecker withdrawLimitChecker;
     private final DetectionRecorder detectionRecorder;
 
-    public FdsServiceImpl(WithdrawLimitChecker withdrawLimitChecker, DetectionRecorder detectionRecorder) {
+    public FdsServiceImpl(LoginAccessChecker loginAccessChecker, WithdrawLimitChecker withdrawLimitChecker,
+                          DetectionRecorder detectionRecorder) {
+        this.loginAccessChecker = loginAccessChecker;
         this.withdrawLimitChecker = withdrawLimitChecker;
         this.detectionRecorder = detectionRecorder;
     }
 
-    // ---------------------------------------------------------------- FDS ① 새 접속 (구현 예정)
+    // ---------------------------------------------------------------- FDS ① 새 접속
 
     @Override
     public LoginAccessResult checkLoginAccess(LoginAccessCommand cmd) {
-        throw new UnsupportedOperationException("FDS ① 새 접속 판단은 아직 구현 전입니다");
+        return loginAccessChecker.check(cmd);
     }
 
     @Override
     public ConfirmResult confirmLoginAccess(long dtcSeq) {
-        throw new UnsupportedOperationException("FDS ① 새 접속 확정은 아직 구현 전입니다");
+        return loginAccessChecker.confirm(dtcSeq);
     }
 
     @Override
     public void failLoginAccess(long dtcSeq) {
-        throw new UnsupportedOperationException("FDS ① 새 접속 실패 기록은 아직 구현 전입니다");
+        loginAccessChecker.fail(dtcSeq);
     }
 
     @Override
     public void registerSignupAccess(long mbrNo, RequestMeta meta) {
-        throw new UnsupportedOperationException("FDS ① 가입 기기 등록은 아직 구현 전입니다");
+        loginAccessChecker.registerSignup(mbrNo, meta);
     }
 
     // ---------------------------------------------------------------- FDS ② 대량 출금

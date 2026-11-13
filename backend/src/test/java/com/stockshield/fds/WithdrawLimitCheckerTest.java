@@ -4,12 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.sql.Timestamp;
-import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.temporal.ChronoUnit;
 import java.util.Map;
 import java.util.UUID;
 
@@ -26,7 +22,6 @@ import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.stockshield.common.config.ClockConfig;
 import com.stockshield.fds.api.CheckResult;
 import com.stockshield.fds.api.FdsService;
 import com.stockshield.fds.api.LedgerReader;
@@ -73,7 +68,7 @@ class WithdrawLimitCheckerTest extends IntegrationTestSupport {
 
     @BeforeEach
     void setUp() {
-        clock = new TestClock(Instant.now().truncatedTo(ChronoUnit.SECONDS));
+        clock = new TestClock();
         recorder = new DetectionRecorder(jdbcTemplate, objectMapper, eventPublisher, clock);
         checker = new WithdrawLimitChecker(ledgerReader, passwordEncoder, recorder, clock, THRESHOLD);
         pwdHash = passwordEncoder.encode(PWD);
@@ -333,37 +328,5 @@ class WithdrawLimitCheckerTest extends IntegrationTestSupport {
                 wdrNo, acntNo, amount, status, done ? null : "WDR_PWD_MISMATCH", done ? 0L : null,
                 UUID.randomUUID().toString(), UUID.randomUUID().toString(), regTs);
         return wdrNo;
-    }
-
-    /** 테스트가 움직이는 시계 */
-    static final class TestClock extends Clock {
-        private Instant instant;
-
-        TestClock(Instant start) {
-            this.instant = start;
-        }
-
-        void advance(Duration d) {
-            instant = instant.plus(d);
-        }
-
-        LocalDateTime now() {
-            return LocalDateTime.now(this);
-        }
-
-        @Override
-        public ZoneId getZone() {
-            return ClockConfig.ZONE;
-        }
-
-        @Override
-        public Clock withZone(ZoneId zone) {
-            return this;
-        }
-
-        @Override
-        public Instant instant() {
-            return instant;
-        }
     }
 }
