@@ -11,8 +11,8 @@ Docker Compose 파일 하나로 팀원 모두 같은 버전의 DB와 Kafka를 �
 | Kafka UI (선택) | `provectuslabs/kafka-ui:v0.7.2` | http://localhost:8085 | - |
 
 - 포트는 모두 `127.0.0.1`에만 열려 있어서 같은 네트워크의 다른 PC에서는 접속할 수 없습니다.
-- Kafka 토픽 3개 `market.tick`, `market.orderbook`, `order.log`(각각 파티션 3개, 메시지 24시간 보관)는 처음 실행할 때 자동으로 만들어집니다. 메시지 형식은 [docs/contracts/kafka-topics.md](../docs/contracts/kafka-topics.md)를 보세요.
-- Kafka는 실시간 시세 전달에만 씁니다. 주문 처리에는 쓰지 않습니다.
+- Kafka 토픽은 `market.tick` 하나(파티션 3개, 메시지 24시간 보관)이고, 처음 실행할 때 `kafka-init`이 자동으로 만듭니다.
+- Kafka는 실시간 시세 전달에만 씁니다. 로그인·주문·출금에는 쓰지 않습니다.
 
 ## 처음 한 번만
 
@@ -24,6 +24,9 @@ cp infra/.env.example infra/.env
 
 `infra/.env`를 열어 `change-me-...` 비밀번호를 바꿉니다. 팀이 같은 값을 쓰려면 팀장에게 개인 메시지로 받으세요.
 `infra/.env`는 `.gitignore`에 등록되어 있어 Git에 올라가지 않습니다.
+
+- `DB_APP_PASSWORD`는 메인 서버가 앱 DB 계정(`stockshield_app`)으로 접속할 때 씁니다. 계정은 백엔드가 처음 실행될 때 Flyway가 만듭니다. 비워 두면 메인 서버가 시작되지 않습니다.
+- 메일·JWT·내부 토큰 값은 담당자에게 개인 메시지로 받아 채웁니다. 비워 두어도 인프라와 테스트는 동작합니다.
 
 ## 실행 · 확인 · 종료
 
@@ -62,26 +65,17 @@ docker compose -f infra/docker-compose.yml stop
 | Password | `infra/.env`의 `POSTGRES_PASSWORD` |
 
 처음 연결할 때 DBeaver가 PostgreSQL 드라이버를 내려받겠냐고 물으면 **Download**를 누릅니다.
-테이블은 여기서 만들지 않습니다. 백엔드(Spring Boot)가 테이블정의서 기준으로 만듭니다.
+테이블은 여기서 만들지 않습니다. 백엔드가 처음 실행될 때 Flyway(`backend/src/main/resources/db/migration`)가 만듭니다.
 
-## Spring Boot · Python에서 쓰는 접속 설정 예시
+## 앱에서 쓰는 접속 설정
 
-```yaml
-spring:
-  datasource:
-    url: jdbc:postgresql://localhost:5432/stockshield
-    username: ${POSTGRES_USER}
-    password: ${POSTGRES_PASSWORD}
-  data:
-    redis:
-      host: localhost
-      port: 6379
-      password: ${REDIS_PASSWORD}
-  kafka:
-    bootstrap-servers: localhost:9092
-```
+메인 서버는 `backend/src/main/resources/application.yml`이 `infra/.env`를 직접 읽습니다. 따로 설정을 적지 않습니다.
 
-앱을 Docker 컨테이너로 같은 Compose에 넣을 때는 `localhost` 대신 `postgres`, `redis`, `kafka:29092`를 씁니다.
+| 대상 | 내 PC에서 실행할 때 | 같은 Compose 안의 컨테이너일 때 |
+| --- | --- | --- |
+| PostgreSQL | `localhost:5432` | `postgres:5432` |
+| Redis | `localhost:6379` | `redis:6379` |
+| Kafka | `localhost:9092` | `kafka:29092` |
 
 ## Kafka 동작 확인
 
