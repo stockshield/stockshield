@@ -19,6 +19,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -44,7 +45,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * - 공용 Clock(MutableClock)과 가짜 메일 발송기는 TestInfraConfig가 @Primary로 넣고, 테스트가 끝날 때마다 되돌린다.
  * - 가짜 FdsService는 여기에 넣지 않는다. 필요한 테스트만 FakeFdsConfig를 @Import한다.
  */
-@SpringBootTest(properties = {
+@SpringBootTest
+// 실제 포트로 띄우는 테스트(RealServerTestSupport)가 webEnvironment만 바꿔도 같은 설정을 물려받게 하려고 @TestPropertySource에 둠
+@TestPropertySource(properties = {
         "stockshield.scheduling.enabled=false",
         "spring.kafka.listener.auto-startup=false",
         "spring.datasource.hikari.minimum-idle=2",
