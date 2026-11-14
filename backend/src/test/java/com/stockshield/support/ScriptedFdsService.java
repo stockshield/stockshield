@@ -26,6 +26,7 @@ public class ScriptedFdsService implements FdsService {
 
     private final AtomicReference<RuntimeException> signupFailure = new AtomicReference<>();
     private final AtomicReference<WithdrawCheckResult> withdrawCheck = new AtomicReference<>(NOT_LARGE);
+    private final AtomicReference<RuntimeException> checkFailure = new AtomicReference<>();
     private final AtomicReference<RuntimeException> recordFailure = new AtomicReference<>();
 
     /** 다음 registerSignupAccess 호출부터 이 예외를 던진다(null이면 정상) */
@@ -38,6 +39,11 @@ public class ScriptedFdsService implements FdsService {
         withdrawCheck.set(result);
     }
 
+    /** 다음 checkWithdrawal 호출부터 이 예외를 던진다(null이면 정상). 누적액·비밀번호를 확인할 수 없는 장애를 만든다 */
+    public void failCheckWith(RuntimeException e) {
+        checkFailure.set(e);
+    }
+
     /** 다음 recordWithdrawal 호출부터 이 예외를 던진다(null이면 정상). 원장이 계좌와 출금 행을 쓴 뒤의 실패를 만든다 */
     public void failRecordWith(RuntimeException e) {
         recordFailure.set(e);
@@ -46,6 +52,7 @@ public class ScriptedFdsService implements FdsService {
     public void reset() {
         signupFailure.set(null);
         withdrawCheck.set(NOT_LARGE);
+        checkFailure.set(null);
         recordFailure.set(null);
     }
 
@@ -74,6 +81,10 @@ public class ScriptedFdsService implements FdsService {
 
     @Override
     public WithdrawCheckResult checkWithdrawal(LockedAccount account, WithdrawCommand cmd) {
+        RuntimeException e = checkFailure.get();
+        if (e != null) {
+            throw e;
+        }
         return withdrawCheck.get();
     }
 
