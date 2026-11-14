@@ -31,6 +31,7 @@ public class Account extends BaseTimeEntity implements Persistable<String> {
 
     public static final String ACTIVE = "ACTIVE";
     public static final String TEMP_LOCKED = "TEMP_LOCKED";
+    public static final String LOCKED = "LOCKED";
 
     @Id
     @Column(name = "acnt_no", length = 20, nullable = false, updatable = false)
@@ -108,6 +109,17 @@ public class Account extends BaseTimeEntity implements Persistable<String> {
     public void tempLock(int failCntAfter) {
         wdrPwdFailCnt = failCntAfter;
         acntStatCd = TEMP_LOCKED;
+    }
+
+    /** 관리자 잠금 (FDS_ALT_001 #4) */
+    public void adminLock() {
+        acntStatCd = LOCKED;
+    }
+
+    /** 관리자 해제: 오류 횟수도 0 (FDS_ALT_001 #4, FDS_WDR_001 #3) */
+    public void unlock() {
+        acntStatCd = ACTIVE;
+        wdrPwdFailCnt = 0;
     }
 
     @Override

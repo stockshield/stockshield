@@ -19,6 +19,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -44,11 +45,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * - 공용 Clock(MutableClock)과 가짜 메일 발송기는 TestInfraConfig가 @Primary로 넣고, 테스트가 끝날 때마다 되돌린다.
  * - 가짜 FdsService는 여기에 넣지 않는다. 필요한 테스트만 FakeFdsConfig를 @Import한다.
  */
-@SpringBootTest(properties = {
+@SpringBootTest
+// 실제 포트로 띄우는 테스트(RealServerTestSupport)가 webEnvironment만 바꿔도 같은 설정을 물려받게 하려고 @TestPropertySource에 둠
+@TestPropertySource(properties = {
         "stockshield.scheduling.enabled=false",
         "spring.kafka.listener.auto-startup=false",
         "spring.datasource.hikari.minimum-idle=2",
         "stockshield.auth.jwt-secret=" + WebMvcSecurityTestConfig.TEST_JWT_SECRET,
+        // 내부 대사 확인 API용. 빈 토큰의 401은 InternalTokenVerifierTest가 컨텍스트 없이 확인함(컨텍스트를 늘리지 않으려고)
+        "stockshield.internal-token=" + IntegrationTestSupport.TEST_INTERNAL_TOKEN,
         // PC의 infra/.env 값이 테스트에 들어오지 않게 한다(CI에는 .env가 없다). 관리자 시드는 AdminSeedMigrationTest가 따로 확인한다
         "spring.flyway.placeholders.adminLgnId=",
         "spring.flyway.placeholders.adminEmlAddr=",
@@ -65,6 +70,7 @@ public abstract class IntegrationTestSupport {
     /** 테스트 회원의 로그인 비밀번호(영문·숫자·특수문자) */
     protected static final String TEST_PASSWORD = "Test1234!";
     protected static final String TEST_WDR_PWD = "246810";
+    protected static final String TEST_INTERNAL_TOKEN = "test-internal-token-0123456789";
     /** MockMvc 요청의 기본 접속 IP */
     protected static final String DEFAULT_IP = "127.0.0.1";
 
