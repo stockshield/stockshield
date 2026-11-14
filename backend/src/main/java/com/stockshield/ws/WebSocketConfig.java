@@ -17,6 +17,8 @@ import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBr
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 
+import com.stockshield.auth.StompAuthChannelInterceptor;
+
 /**
  * STOMP WebSocket (연결 합의서 v0.0.8 8절, 합의 17).
  *
@@ -33,10 +35,13 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     private final String[] allowedOrigins;
+    private final StompAuthChannelInterceptor stompAuthChannelInterceptor;
 
-    public WebSocketConfig(@Value("${stockshield.cors.allowed-origins:http://localhost:5173}") String allowedOrigins) {
+    public WebSocketConfig(@Value("${stockshield.cors.allowed-origins:http://localhost:5173}") String allowedOrigins,
+                           StompAuthChannelInterceptor stompAuthChannelInterceptor) {
         this.allowedOrigins = Arrays.stream(allowedOrigins.split(","))
                 .map(String::trim).filter(s -> !s.isEmpty()).toArray(String[]::new);
+        this.stompAuthChannelInterceptor = stompAuthChannelInterceptor;
     }
 
     @Override
@@ -52,7 +57,7 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
-        registration.interceptors(new SendFrameBlocker());
+        registration.interceptors(new SendFrameBlocker(), stompAuthChannelInterceptor);
     }
 
     /** 클라이언트의 SEND 프레임을 거절한다 */
