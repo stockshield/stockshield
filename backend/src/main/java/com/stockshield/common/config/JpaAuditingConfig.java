@@ -2,6 +2,7 @@ package com.stockshield.common.config;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.time.temporal.TemporalAccessor;
 import java.util.Optional;
 
@@ -20,6 +21,7 @@ public class JpaAuditingConfig {
 
     @Bean
     public DateTimeProvider clockDateTimeProvider(Clock clock) {
-        return () -> Optional.<TemporalAccessor>of(LocalDateTime.now(clock));
+        // DB TIMESTAMP는 마이크로초까지라, 엔티티에 남는 값과 저장된 값이 같도록 자름(같은 키 재요청 응답이 처음과 같아야 함)
+        return () -> Optional.<TemporalAccessor>of(LocalDateTime.now(clock).truncatedTo(ChronoUnit.MICROS));
     }
 }

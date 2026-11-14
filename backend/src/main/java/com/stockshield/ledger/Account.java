@@ -30,6 +30,7 @@ import lombok.NoArgsConstructor;
 public class Account extends BaseTimeEntity implements Persistable<String> {
 
     public static final String ACTIVE = "ACTIVE";
+    public static final String TEMP_LOCKED = "TEMP_LOCKED";
 
     @Id
     @Column(name = "acnt_no", length = 20, nullable = false, updatable = false)
@@ -71,6 +72,42 @@ public class Account extends BaseTimeEntity implements Persistable<String> {
         a.wdrPwdFailCnt = 0;
         a.acntStatCd = ACTIVE;
         return a;
+    }
+
+    public boolean isActive() {
+        return ACTIVE.equals(acntStatCd);
+    }
+
+    // 아래 변경 메서드는 계좌 락을 잡은 트랜잭션 안에서만 부름 (TRD_LED_001 #2)
+
+    public void decreaseDpsBal(long amt) {
+        if (amt <= 0 || dpsBal < amt) {
+            throw new IllegalStateException("예수금을 차감할 수 없습니다 acntNo=" + acntNo);
+        }
+        dpsBal -= amt;
+    }
+
+    public void increaseDpsBal(long amt) {
+        if (amt <= 0) {
+            throw new IllegalStateException("예수금을 늘릴 수 없습니다 acntNo=" + acntNo);
+        }
+        dpsBal = Math.addExact(dpsBal, amt);
+    }
+
+    /** 출금 비밀번호가 맞으면 0으로 (FDS_WDR_001 #3) */
+    public void resetWdrPwdFailCnt() {
+        wdrPwdFailCnt = 0;
+    }
+
+    /** 횟수는 FDS가 계산해 준 값을 쓰기만 함(규칙은 FDS 한 곳, 변경은 원장 한 곳. 연결 합의서 6절) */
+    public void recordWdrPwdFail(int failCntAfter) {
+        wdrPwdFailCnt = failCntAfter;
+    }
+
+    /** 5회째 오류: 주문·출금을 모두 막고 관리자만 풂 */
+    public void tempLock(int failCntAfter) {
+        wdrPwdFailCnt = failCntAfter;
+        acntStatCd = TEMP_LOCKED;
     }
 
     @Override
