@@ -26,6 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.jayway.jsonpath.JsonPath;
 import com.stockshield.common.trace.TraceIdFilter;
+import com.stockshield.support.WebMvcSecurityTestConfig;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
@@ -36,8 +37,9 @@ import jakarta.validation.constraints.NotNull;
  * API 명세서 공통 규칙 1(X-Trace-Id, Retry-After)·2(에러 응답 형식)·3(에러 코드), SYS_SEC_001 #6
  */
 // controllers를 지정하지 않으면 모든 @Controller가 올라와, 서비스를 주입받는 컨트롤러가 생기면 이 테스트까지 깨진다 (연결 합의서 12절)
+// @WebMvcTest는 SecurityConfig를 올리지 않아 Spring Security 기본 보안에 걸리므로 테스트용 보안 설정을 함께 올린다 (연결 합의서 12절)
 @WebMvcTest(controllers = ErrorResponseFormatTest.ProbeController.class)
-@Import(ErrorResponseFormatTest.ProbeController.class)
+@Import({ErrorResponseFormatTest.ProbeController.class, WebMvcSecurityTestConfig.class})
 class ErrorResponseFormatTest {
 
     @Autowired
