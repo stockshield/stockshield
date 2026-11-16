@@ -70,4 +70,47 @@ class KisTickParserTest {
         assertThatThrownBy(() -> KisTickParser.parse("0|H0STCNT0|002|a^b^c", DAY))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    /** 지수(H0UPCNT0) 한 건: 30개 필드 중 쓰는 필드만 채움 */
+    static String indexRecord(String code, String hhmmss, String value, String sign, String chg, String accVol,
+                              String rate) {
+        String[] f = Collections.nCopies(30, "0").toArray(new String[0]);
+        f[0] = code;
+        f[1] = hhmmss;
+        f[2] = value;
+        f[3] = sign;
+        f[4] = chg;
+        f[5] = accVol;
+        f[9] = rate;
+        return String.join("^", f);
+    }
+
+    @Test
+    @DisplayName("지수 한 건: type INDEX, 지수·전일 대비는 소수, 하락 부호면 음수, currentPrice는 비움")
+    void parsesIndexRecord() {
+        String frame = "0|H0UPCNT0|001|" + indexRecord("0001", "091502", "2650.31", "5", "11.07", "123456", "0.42");
+        List<TickMessage> ticks = KisTickParser.parse(frame, DAY);
+        assertThat(ticks).hasSize(1);
+        TickMessage t = ticks.get(0);
+        assertThat(t.type()).isEqualTo("INDEX");
+        assertThat(t.code()).isEqualTo("0001");
+        assertThat(t.idxVal()).isEqualByComparingTo("2650.31");
+        assertThat(t.idxChg()).isEqualByComparingTo("-11.07");
+        assertThat(t.chgRt()).isEqualByComparingTo("-0.42");
+        assertThat(t.accVol()).isEqualTo(123_456L);
+        assertThat(t.currentPrice()).isNull();
+        assertThat(t.chgPrc()).isNull();
+        assertThat(t.prcTs()).isEqualTo("2026-11-13T09:15:02+09:00");
+    }
+
+    @Test
+    @DisplayName("지수 여러 건(코스피·코스닥)도 필드 수를 건수로 나눠 각각 만든다. 상승은 양수")
+    void parsesMultipleIndexRecords() {
+        String body = indexRecord("0001", "100000", "2655.00", "2", "4.69", "1", "0.18")
+                + "^" + indexRecord("1001", "100000", "870.12", "3", "0.00", "2", "0.00");
+        List<TickMessage> ticks = KisTickParser.parse("0|H0UPCNT0|002|" + body, DAY);
+        assertThat(ticks).extracting(TickMessage::code).containsExactly("0001", "1001");
+        assertThat(ticks.get(0).idxChg()).isEqualByComparingTo("4.69");
+        assertThat(ticks.get(1).idxChg()).isEqualByComparingTo("0");
+    }
 }

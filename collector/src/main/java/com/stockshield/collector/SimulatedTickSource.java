@@ -32,6 +32,7 @@ import com.stockshield.collector.CollectorProperties.Stock;
  * - REPLAY: 실시간 수집 때 남긴 data/ticks-YYYYMMDD.jsonl을 원래 간격대로(speed배) 다시 보낸다.
  *   시세 시각(prcTs)은 보내는 시점으로 바꾸고 원래 체결 시각은 orgTs에 담는다. 파일 끝에 닿으면 처음부터 다시 재생한다.
  * - MOCK: 재생할 파일이 없을 때 종목마다 1초에 한 번 무작위로 조금씩 움직이는 가짜 시세를 보낸다.
+ *   코스피·코스닥 지수도 같은 방식으로 움직이는 가짜 값(INDEX)을 보낸다.
  * 두 방식 모두 실시간과 같은 market.tick 경로를 써서 화면·위험 의심 판단·주문이 그대로 동작한다.
  */
 @Component
@@ -106,8 +107,23 @@ public class SimulatedTickSource {
             base.put(s.code(), p);
             acc.put(s.code(), 0L);
         }
-        log.info("가짜 시세(MOCK) 전송 시작: 종목 {}개, 1초 간격", prices.size());
+        Map<String, BigDecimal> idx = new HashMap<>();
+        for (Stock i : props.indices()) {
+            idx.put(i.code(), seedIndex(i.code()));
+        }
+        Map<String, BigDecimal> idxBase = new HashMap<>(idx);
+        log.info("가짜 시세(MOCK) 전송 시작: 종목 {}개, 지수 {}개, 1초 간격", prices.size(), idx.size());
         while (running) {
+            for (Stock i : props.indices()) {
+                BigDecimal prev = idx.get(i.code());
+                BigDecimal next = prev.multiply(BigDecimal.valueOf(1 + ThreadLocalRandom.current().nextGaussian() * 0.0005))
+                        .setScale(2, RoundingMode.HALF_UP);
+                idx.put(i.code(), next);
+                BigDecimal base0 = idxBase.get(i.code());
+                BigDecimal chg = next.subtract(base0);
+                BigDecimal rate = chg.multiply(BigDecimal.valueOf(100)).divide(base0, 2, RoundingMode.HALF_UP);
+                publisher.publish(TickMessage.index(i.code(), next, chg, rate, null, nowTs(), "MOCK"));
+            }
             for (Stock s : props.stocks()) {
                 ThreadLocalRandom rnd = ThreadLocalRandom.current();
                 long prev = prices.get(s.code());
@@ -121,6 +137,11 @@ public class SimulatedTickSource {
             }
             sleep(1_000);
         }
+    }
+
+    /** 가짜 지수 시작값. 실제 값과 상관없는 시연용 숫자다 */
+    private static BigDecimal seedIndex(String code) {
+        return "1001".equals(code) ? new BigDecimal("1100.00") : new BigDecimal("4000.00");
     }
 
     /** 가짜 시세 시작가: 재생 파일이 있으면 마지막 가격, 없으면 종목코드로 정한 값(50,000 ~ 500,000원) */

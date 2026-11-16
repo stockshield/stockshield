@@ -69,6 +69,12 @@ collector:
     - { code: '028300', name: HLB, market: KOSDAQ }
     - { code: '058470', name: 리노공업, market: KOSDAQ }
 
+  # 지수 2개 (메인 화면 KOSPI·KOSDAQ, MKT_VIEW_001 #1). KIS 국내지수 실시간체결(H0UPCNT0)로 받는다.
+  # 웹소켓 구독은 체결 30 + 지수 2 = 32건으로 한 세션 한도 41건 안이다 (연결 합의서 11절)
+  indices:
+    - { code: '0001', name: 코스피, market: KOSPI }
+    - { code: '1001', name: 코스닥, market: KOSDAQ }
+
 logging:
   level:
     org.apache.kafka: WARN

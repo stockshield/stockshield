@@ -48,7 +48,7 @@ public class PriceCache {
         Map<String, Object> v = new LinkedHashMap<>();
         v.put("idxCd", t.code());
         v.put("currentVal", t.idxVal());
-        v.put("chgVal", t.chgPrc());
+        v.put("chgVal", t.idxChg() != null ? t.idxChg() : t.chgPrc());
         v.put("chgRt", t.chgRt());
         v.put("prcTs", t.prcTs());
         redis.opsForValue().set(INDEX_KEY + t.code(), json(v));

@@ -18,10 +18,15 @@ import com.stockshield.collector.TickMessage;
  * 한 프레임에 여러 건이 오면 필드가 건수만큼 이어 붙어 오므로, 한 건의 필드 수 = 전체 필드 수 / 건수로 나눈다.
  * 사용하는 필드(앞에서부터): 0 종목코드, 1 체결시간(HHMMSS), 2 현재가, 3 전일대비부호, 4 전일대비, 5 전일대비율,
  * 12 체결거래량, 13 누적거래량. 전일대비부호 1·2는 상승, 3은 보합, 4·5는 하락이다.
+ *
+ * 지수(H0UPCNT0, 필드 30개. KIS 공식 예제 open-trading-api examples_llm/domestic_stock/index_ccnl 기준):
+ * 0 업종구분코드(0001 코스피, 1001 코스닥), 1 영업시간(HHMMSS), 2 현재가지수, 3 전일대비부호, 4 전일대비,
+ * 5 누적거래량, 9 전일대비율. 지수 값은 소수(예: 2650.12)다.
  */
 public final class KisTickParser {
 
     public static final String TR_ID = "H0STCNT0";
+    public static final String INDEX_TR_ID = "H0UPCNT0";
     private static final ZoneOffset KST = ZoneOffset.ofHours(9);
     private static final DateTimeFormatter HHMMSS = DateTimeFormatter.ofPattern("HHmmss");
     private static final DateTimeFormatter ISO = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssXXX");
@@ -35,7 +40,11 @@ public final class KisTickParser {
 
     public static List<TickMessage> parse(String frame, LocalDate today) {
         String[] head = frame.split("\\|", 4);
-        if (head.length < 4 || !TR_ID.equals(head[1]) || !"0".equals(head[0])) {
+        if (head.length < 4 || !"0".equals(head[0])) {
+            return List.of();
+        }
+        boolean index = INDEX_TR_ID.equals(head[1]);
+        if (!index && !TR_ID.equals(head[1])) {
             return List.of();
         }
         int count = Integer.parseInt(head[2]);
@@ -47,6 +56,10 @@ public final class KisTickParser {
         List<TickMessage> out = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             int o = i * per;
+            if (index) {
+                out.add(index(f, o, today));
+                continue;
+            }
             String code = f[o];
             LocalTime time = LocalTime.parse(f[o + 1], HHMMSS);
             long price = Long.parseLong(f[o + 2]);
@@ -64,6 +77,27 @@ public final class KisTickParser {
             out.add(TickMessage.tick(code, price, chg, rate, trdVol, accVol, ts, "KIS"));
         }
         return out;
+    }
+
+    private static TickMessage index(String[] f, int o, LocalDate today) {
+        String code = f[o];
+        LocalTime time = LocalTime.parse(f[o + 1], HHMMSS);
+        BigDecimal value = new BigDecimal(f[o + 2]);
+        int sign = signOf(f[o + 3]);
+        BigDecimal chg = signed(new BigDecimal(f[o + 4]), sign);
+        BigDecimal rate = signed(new BigDecimal(f[o + 9]), sign);
+        Long accVol = f[o + 5].isBlank() ? null : Long.parseLong(f[o + 5]);
+        String ts = OffsetDateTime.of(today, time, KST).format(ISO);
+        return TickMessage.index(code, value, chg, rate, accVol, ts, "KIS");
+    }
+
+    /** 부호 필드로 방향을 맞춘다. 보합이면 0(소수 자릿수는 유지) */
+    private static BigDecimal signed(BigDecimal v, int sign) {
+        BigDecimal abs = v.abs();
+        if (sign < 0) {
+            return abs.negate();
+        }
+        return sign == 0 ? BigDecimal.ZERO.setScale(abs.scale()) : abs;
     }
 
     private static int signOf(String code) {
