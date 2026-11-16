@@ -129,6 +129,8 @@ class AdminSeedMigrationTest extends IntegrationTestSupport {
         return Flyway.configure()
                 .dataSource(url(db), POSTGRES.getUsername(), POSTGRES.getPassword())
                 .locations("classpath:db/migration")
+                // V5 이후 번호가 늘어도 V4까지만 돌려 기대 버전·미적용 건수를 고정하려고 target 지정
+                .target("4")
                 .placeholders(placeholders)
                 .load();
     }
