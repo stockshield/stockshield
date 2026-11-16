@@ -137,15 +137,25 @@ class MarketControllerTest extends IntegrationTestSupport {
     }
 
     @Test
-    @DisplayName("종목 상세의 priceDelayed는 그 종목의 시세 기준: 다른 종목이 새로워도 이 종목이 60초 넘게 끊기면 true, 정확히 60초는 false")
+    @DisplayName("종목 상세의 priceDelayed는 그 종목의 시세 기준: 다른 종목이 새로워도 이 종목이 60초 넘게 끊기면 true")
     void detailDelayedPerStock() throws Exception {
+        // 실제 시계로 도는 테스트라 경계(60초) 바로 옆 값은 쓰지 않는다. 경계는 isStaleBoundary에서 고정 시각으로 본다
         price("Q00001", 10_000, 1, 1000, now());
-        price("Q00002", 20_000, 1, 1000, ago(61));
-        price("Q00003", 30_000, 1, 1000, ago(59));
+        price("Q00002", 20_000, 1, 1000, ago(90));
+        price("Q00003", 30_000, 1, 1000, ago(30));
         mvc.perform(get("/api/v1/market/stocks/Q00001")).andExpect(jsonPath("$.priceDelayed").value(false));
         mvc.perform(get("/api/v1/market/stocks/Q00002")).andExpect(jsonPath("$.priceDelayed").value(true));
         mvc.perform(get("/api/v1/market/stocks/Q00003")).andExpect(jsonPath("$.priceDelayed").value(false));
         mvc.perform(get("/api/v1/market/stocks/Q00004")).andExpect(jsonPath("$.priceDelayed").value(true));
+    }
+
+    @Test
+    @DisplayName("지연 기준: 정확히 60초는 지연이 아니고 60초를 넘으면 지연 (주문 PriceReader와 같은 기준)")
+    void isStaleBoundary() {
+        LocalDateTime t = LocalDateTime.of(2026, 11, 17, 10, 0, 0);
+        assertThat(MarketQueryService.isStale(t, t.plusSeconds(60))).isFalse();
+        assertThat(MarketQueryService.isStale(t, t.plusSeconds(60).plusNanos(1_000_000))).isTrue();
+        assertThat(MarketQueryService.isStale(t, t.plusSeconds(61))).isTrue();
     }
 
     @Test

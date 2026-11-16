@@ -105,6 +105,16 @@ class MarketTickListenerTest extends IntegrationTestSupport {
     }
 
     @Test
+    @DisplayName("수집기가 보낸 지수 JSON(idxChg 소수)을 읽어 index:{idxCd}의 chgVal에 소수 그대로 쓴다")
+    void writesIndexChangeFromCollectorJson() {
+        listener.onMessage("{\"v\":1,\"type\":\"INDEX\",\"code\":\"1001\",\"idxVal\":1101.57,"
+                + "\"chgRt\":-0.38,\"accVol\":812345,\"prcTs\":\"2026-11-17T09:30:00+09:00\",\"src\":\"KIS\","
+                + "\"idxChg\":-4.21}");
+        assertThat(redis.opsForValue().get("index:1001"))
+                .contains("\"currentVal\":1101.57").contains("\"chgVal\":-4.21").contains("\"chgRt\":-0.38");
+    }
+
+    @Test
     @DisplayName("해석할 수 없는 메시지는 예외 없이 건너뛴다")
     void ignoresBrokenMessage() {
         listener.onMessage("{not json");

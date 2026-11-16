@@ -28,10 +28,11 @@ import com.stockshield.collector.TickMessage;
 import com.stockshield.collector.TickPublisher;
 
 /**
- * 한국투자증권 웹소켓으로 서비스 대상 종목의 실시간 체결가(H0STCNT0)를 구독한다 (MKT_TICK_001 #1·#2).
+ * 한국투자증권 웹소켓으로 서비스 대상 종목의 실시간 체결가(H0STCNT0)와 코스피·코스닥 지수(H0UPCNT0)를 구독한다
+ * (MKT_TICK_001 #1·#2, MKT_VIEW_001 #1).
  *
  * - 접속키(approval_key)를 REST /oauth2/Approval로 받아 웹소켓 구독 요청에 쓴다. 앱 키·시크릿·접속키는 로그에 남기지 않는다.
- * - 한 세션의 실시간 등록 한도는 41건이고 (TR × 종목) 단위로 센다. 체결가 30종목 = 30건.
+ * - 한 세션의 실시간 등록 한도는 41건이고 (TR × 종목) 단위로 센다. 체결가 30종목 + 지수 2개 = 32건.
  * - 서버가 보내는 PINGPONG은 그대로 돌려보낸다.
  * - 연결이 끊기거나 실패하면 5초 뒤 다시 연결한다(장애 대응). 그동안 메인 서버는 마지막 시세를 유지한다.
  */
@@ -57,7 +58,8 @@ public class KisRealtimeCollector {
     /** 끊기면 다시 연결하는 루프. 별도 스레드에서 부른다 */
     public void runForever() {
         Kis kis = props.kis();
-        log.info("한국투자증권 실시간 체결가 수집 시작 {} 종목 {}개", kis, props.stocks().size());
+        log.info("한국투자증권 실시간 체결가 수집 시작 {} 종목 {}개, 지수 {}개", kis, props.stocks().size(),
+                props.indices().size());
         while (running) {
             try {
                 String approvalKey = approvalKey(kis);
@@ -66,7 +68,8 @@ public class KisRealtimeCollector {
                         .connectTimeout(Duration.ofSeconds(10))
                         .buildAsync(URI.create(kis.wsUrl() + "/tryitout/" + KisTickParser.TR_ID), new Listener(closed))
                         .join();
-                subscribe(ws, approvalKey, props.stocks());
+                subscribe(ws, approvalKey, KisTickParser.TR_ID, props.stocks());
+                subscribe(ws, approvalKey, KisTickParser.INDEX_TR_ID, props.indices());
                 closed.await();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -109,12 +112,12 @@ public class KisRealtimeCollector {
         }
     }
 
-    private void subscribe(WebSocket ws, String approvalKey, List<Stock> stocks) {
+    private void subscribe(WebSocket ws, String approvalKey, String trId, List<Stock> stocks) {
         for (Stock s : stocks) {
             Map<String, Object> msg = Map.of(
                     "header", Map.of("approval_key", approvalKey, "custtype", "P", "tr_type", "1",
                             "content-type", "utf-8"),
-                    "body", Map.of("input", Map.of("tr_id", KisTickParser.TR_ID, "tr_key", s.code())));
+                    "body", Map.of("input", Map.of("tr_id", trId, "tr_key", s.code())));
             try {
                 ws.sendText(objectMapper.writeValueAsString(msg), true).join();
                 Thread.sleep(50);   // 등록 요청을 한꺼번에 몰아 보내지 않는다
@@ -125,7 +128,7 @@ public class KisRealtimeCollector {
                 throw new IllegalStateException("구독 요청 실패 " + s.code() + ": " + e.getMessage(), e);
             }
         }
-        log.info("체결가 구독 요청 {}건 보냄", stocks.size());
+        log.info("{} 구독 요청 {}건 보냄", trId, stocks.size());
     }
 
     private class Listener implements WebSocket.Listener {

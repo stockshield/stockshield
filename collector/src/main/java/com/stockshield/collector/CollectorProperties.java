@@ -8,7 +8,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /** 수집기 설정 (application.yml의 collector.*) */
 @ConfigurationProperties(prefix = "collector")
 public record CollectorProperties(String mode, boolean demoMode, String topic, Kis kis, Record record,
-                                  Replay replay, List<Stock> stocks) {
+                                  Replay replay, List<Stock> stocks, List<Stock> indices) {
+
+    public CollectorProperties {
+        indices = indices == null ? List.of() : List.copyOf(indices);
+    }
 
     public enum Mode { KIS, MOCK, REPLAY }
 
