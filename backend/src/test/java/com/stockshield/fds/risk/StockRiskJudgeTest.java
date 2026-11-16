@@ -88,7 +88,7 @@ class StockRiskJudgeTest extends IntegrationTestSupport {
     }
 
     @Test
-    @DisplayName("시세가 60초 넘게 끊기면 sweep이 표시를 내리고, 이어지는 동안은 유지한다")
+    @DisplayName("시세가 60초 넘게(61초부터) 끊기면 sweep이 표시를 내리고, 정확히 60초까지는 유지한다")
     void sweepRemovesStaleRisk() {
         minute("300001", 2, "12.00");
         assertThat(judge.isActive("300001")).isTrue();
@@ -97,7 +97,11 @@ class StockRiskJudgeTest extends IntegrationTestSupport {
         judge.sweep();
         assertThat(judge.isActive("300001")).isTrue();
 
-        clock.set(open.plusMinutes(3));                    // 60초
+        clock.set(open.plusMinutes(3));                    // 정확히 60초: 아직 지연 아님 (주문 PriceReader와 같은 기준)
+        judge.sweep();
+        assertThat(judge.isActive("300001")).isTrue();
+
+        clock.set(open.plusMinutes(3).plusSeconds(1));     // 61초
         judge.sweep();
         assertThat(judge.isActive("300001")).isFalse();
         assertThat(redis.hasKey("risk:stock:300001")).isFalse();

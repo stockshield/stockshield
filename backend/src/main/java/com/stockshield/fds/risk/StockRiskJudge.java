@@ -119,7 +119,7 @@ public class StockRiskJudge {
         LocalDateTime staleBefore = LocalDateTime.now(clock).minus(STALE_AFTER);
         for (String tckCd : active) {
             LocalDateTime last = lastPrcTs.get(tckCd);
-            boolean stale = last == null || !last.isAfter(staleBefore);
+            boolean stale = last == null || last.isBefore(staleBefore);
             try {
                 if (stale) {
                     redis.delete(RISK_KEY + tckCd);
