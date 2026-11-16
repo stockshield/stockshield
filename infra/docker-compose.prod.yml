@@ -1,0 +1,204 @@
+# StockShield 배포용 (EC2 한 대에 전체 서비스)
+# 실행(EC2, 저장소 루트에서):
+#   docker compose -f infra/docker-compose.prod.yml --env-file infra/.env up -d --build
+#
+# - 바깥에 여는 포트는 nginx 80 하나다. DB·Redis·Kafka·메인 서버·AI 서버는 docker 네트워크 안에서만 보인다.
+# - docker 네트워크 대역은 172.28.0.0/16으로, nginx 주소는 172.28.0.10으로 고정한다.
+#   메인 서버는 이 주소가 보낸 X-Forwarded-For만 믿는다(P11, SYS_SEC_001 #4).
+# - 컨테이너끼리는 서비스 이름으로 찾는다: postgres, redis, kafka:29092, backend:8080, ai-server:8000
+# - 로컬 개발용 infra/docker-compose.yml과 같은 버전을 쓴다(SYS_ENV_001). 같은 PC에서 둘을 동시에 띄우지 않는다.
+name: stockshield
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:15.19
+    <<: *restart
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?infra/.env 에 POSTGRES_DB 를 설정하세요}
+      POSTGRES_USER: ${POSTGRES_USER:?infra/.env 에 POSTGRES_USER 를 설정하세요}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?infra/.env 에 POSTGRES_PASSWORD 를 설정하세요}
+      TZ: Asia/Seoul
+      PGTZ: Asia/Seoul
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [stockshield]
+
+  redis:
+    image: redis:7.2.17
+    <<: *restart
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:?infra/.env 에 REDIS_PASSWORD 를 설정하세요}"]
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+      TZ: Asia/Seoul
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [stockshield]
+
+  # Kafka 1대 (KRaft). 배포에서는 컨테이너끼리만 쓰므로 kafka:29092 하나만 연다
+  kafka:
+    image: apache/kafka:3.7.2
+    <<: *restart
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_HEAP_OPTS: "-Xms512m -Xmx512m"
+      TZ: Asia/Seoul
+    # 시세는 24시간만 보관하는 전달용이라 Kafka 데이터는 볼륨에 남기지 않는다(재시작하면 비어도 된다)
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:29092 > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 15s
+    networks: [stockshield]
+
+  # 토픽 생성(처음 한 번). 이미 있으면 그대로 두고 끝난다
+  kafka-init:
+    image: apache/kafka:3.7.2
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 \
+          --create --if-not-exists --topic market.tick --partitions 3 --replication-factor 1 \
+          --config retention.ms=86400000
+    restart: "no"
+    networks: [stockshield]
+
+  # FastAPI + Gemini. 메인 서버만 부른다(외부 포트 없음)
+  ai-server:
+    build:
+      context: ../ai-server
+    <<: *restart
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.1-flash-lite}
+      TZ: Asia/Seoul
+    networks: [stockshield]
+
+  # 메인 서버 (원장·FDS·시세 조회·WebSocket)
+  backend:
+    build:
+      context: ../backend
+    <<: *restart
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      ai-server:
+        condition: service_started
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_APP_USER: ${DB_APP_USER:?infra/.env 에 DB_APP_USER 를 설정하세요}
+      DB_APP_PASSWORD: ${DB_APP_PASSWORD:?infra/.env 에 DB_APP_PASSWORD 를 설정하세요}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      KAFKA_BOOTSTRAP: kafka:29092
+      AI_SERVER_URL: http://ai-server:8000
+      MAIL_HOST: ${MAIL_HOST:-smtp.gmail.com}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      JWT_SECRET: ${JWT_SECRET:?infra/.env 에 JWT_SECRET 을 설정하세요}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN:-}
+      ADMIN_LGN_ID: ${ADMIN_LGN_ID:-}
+      ADMIN_EML_ADDR: ${ADMIN_EML_ADDR:-}
+      ADMIN_PWD_HASH: ${ADMIN_PWD_HASH:-}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?infra/.env 에 CORS_ALLOWED_ORIGINS 를 설정하세요(배포 주소와 글자 그대로 같게)}
+      DEMO_MODE: ${DEMO_MODE:-false}
+      FINLIGHT_API_KEY: ${FINLIGHT_API_KEY:-}
+      JAVA_TOOL_OPTIONS: "-Xms512m -Xmx1536m"
+      TZ: Asia/Seoul
+    networks: [stockshield]
+
+  # 시세 수집기. 같은 KIS 키로 두 곳에서 동시에 띄우지 않는다(노트북 수집기와 동시 실행 금지)
+  collector:
+    build:
+      context: ../collector
+    <<: *restart
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      COLLECTOR_MODE: ${COLLECTOR_MODE:-KIS}
+      KAFKA_BOOTSTRAP: kafka:29092
+      KIS_ENV: ${KIS_ENV:-real}
+      KIS_APP_KEY: ${KIS_APP_KEY:-}
+      KIS_APP_SECRET: ${KIS_APP_SECRET:-}
+      KIS_REST_URL: ${KIS_REST_URL:-https://openapi.koreainvestment.com:9443}
+      KIS_WS_URL: ${KIS_WS_URL:-ws://ops.koreainvestment.com:21000}
+      DEMO_MODE: ${DEMO_MODE:-false}
+      COLLECTOR_REPLAY_FILE: ${COLLECTOR_REPLAY_FILE:-}
+      JAVA_TOOL_OPTIONS: "-Xms128m -Xmx512m"
+      TZ: Asia/Seoul
+    volumes:
+      - collector-data:/app/data
+    networks: [stockshield]
+
+  # 화면 + 프록시. 바깥에 열리는 유일한 포트
+  nginx:
+    build:
+      context: ../frontend
+      dockerfile: ../infra/nginx/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
+    <<: *restart
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      stockshield:
+        ipv4_address: 172.28.0.10
+
+networks:
+  stockshield:
+    name: stockshield
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  postgres-data:
+  redis-data:
+  collector-data:
