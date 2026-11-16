@@ -35,6 +35,26 @@ public class AiServerClient {
     public record DetectionReason(String aiRsnCont, String aiChkCont) {
     }
 
+    static final String SUMMARY_PATH = "/api/v1/internal/ai/summary";
+
+    /** 뉴스 요약 응답 (API 명세서 15행): 3문장 이내 요약(줄바꿈 구분), 감성 점수 -1.00 ~ 1.00 */
+    public record NewsSummary(String aiSmryCont, java.math.BigDecimal aiSntmScr) {
+    }
+
+    /** 뉴스 3줄 요약·감성 점수 (NEWS_AI_001). 실패(연결·시간 초과·4xx·5xx·빈 응답)는 모두 예외 */
+    public NewsSummary summarize(String newsId, String newsTitl, String newsCont) {
+        NewsSummary r = restClient.post()
+                .uri(SUMMARY_PATH)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("newsId", newsId, "newsTitl", newsTitl, "newsCont", newsCont))
+                .retrieve()
+                .body(NewsSummary.class);
+        if (r == null || r.aiSmryCont() == null || r.aiSmryCont().isBlank() || r.aiSntmScr() == null) {
+            throw new IllegalStateException("AI 서버 요약 응답이 비어 있습니다");
+        }
+        return r;
+    }
+
     /** 실패(연결·시간 초과·4xx·5xx·빈 응답)는 모두 예외 */
     public DetectionReason explain(long dtcSeq, String ruleCd, String rsltCd, Map<String, Object> facts) {
         DetectionReason r = restClient.post()
