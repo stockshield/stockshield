@@ -11,6 +11,10 @@ spring:
     url: jdbc:postgresql://localhost:${POSTGRES_PORT:5432}/${POSTGRES_DB:stockshield}
     username: ${DB_APP_USER:stockshield_app}
     password: ${DB_APP_PASSWORD}
+    # 동시 사용자 50명 k6 부하(backend/load-test)로 정함: 10 → 20에서 주문 p95 406 → 310ms, 처리량 19% 증가 (SYS_CORE_001 구현방안)
+    # FDS ③ 비동기 작업(fdsExecutor 최대 4)도 이 풀을 함께 씀
+    hikari:
+      maximum-pool-size: 20
 
   # 소유자(마이그레이션) 계정: 테이블·제약·권한은 Flyway SQL로만 바꾼다 (SYS_ENV_001 #10)
   flyway:
