@@ -1,13 +1,16 @@
 package com.stockshield.common.db;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
+import java.util.Map;
 
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import com.stockshield.support.IntegrationTestSupport;
@@ -51,5 +54,27 @@ class SchemaMigrationTest extends IntegrationTestSupport {
     void sessionTimeZoneIsSeoul() {
         String timeZone = jdbcTemplate.queryForObject("SHOW TIME ZONE", String.class);
         assertThat(timeZone).isEqualTo("Asia/Seoul");
+    }
+
+    @Test
+    @DisplayName("news.news_url은 VARCHAR(1000) NOT NULL이다 (V5, 대기 목록 #11)")
+    void newsUrlColumn() {
+        Map<String, Object> col = jdbcTemplate.queryForMap(
+                "SELECT data_type, character_maximum_length, is_nullable FROM information_schema.columns "
+                        + "WHERE table_schema = 'public' AND table_name = 'news' AND column_name = 'news_url'");
+
+        assertThat(col)
+                .containsEntry("data_type", "character varying")
+                .containsEntry("character_maximum_length", 1000)
+                .containsEntry("is_nullable", "NO");
+    }
+
+    @Test
+    @DisplayName("원문 주소 없이 뉴스를 넣으면 거부된다 (NEWS_AI_001 #4)")
+    void newsWithoutUrlRejected() {
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "INSERT INTO news (news_id, news_titl, news_cont, pub_ts) VALUES (?, ?, ?, ?)",
+                "TEST-NO-URL", "제목", "요약", java.sql.Timestamp.valueOf("2026-11-16 09:00:00")))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 }
