@@ -1,94 +1,300 @@
-import React, { useState, useEffect } from 'react';
-import { Shield, ShieldAlert, AlertTriangle, CheckCircle, XCircle, Lock, Unlock, Eye, Search, Filter, RefreshCw, ArrowLeft, Activity, Bell, FileSpreadsheet, Bot, CheckCircle2, AlertOctagon } from 'lucide-react';
-import { fetchServerAlerts, updateAlertStatus, runServerReconciliation } from '../utils/storage';
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  ShieldAlert,
+  AlertTriangle,
+  CheckCircle,
+  Lock,
+  Unlock,
+  Search,
+  RefreshCw,
+  ArrowLeft,
+  Activity,
+  Bot,
+  CheckCircle2,
+  AlertOctagon,
+  TrendingUp,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+} from 'lucide-react';
+import {
+  fetchAdminDetections,
+  fetchRiskStocks,
+  runServerReconciliation,
+  fetchAdminReconcileHistory,
+  fetchAdminReconcileDetail,
+  changeAdminAccountStatus,
+} from '../utils/storage';
+import { createStompManager } from '../utils/stompClient';
 import AlertDetailModal from './AlertDetailModal';
 
-export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, lastQuoteTime }) {
-  const [alerts, setAlerts] = useState([]);
-  const [selectedAlert, setSelectedAlert] = useState(null);
-  const [riskFilter, setRiskFilter] = useState('ALL'); // ALL, CRITICAL, WARNING, CAUTION
-  const [statusFilter, setStatusFilter] = useState('ALL'); // ALL, HOLD, APPROVED, REJECTED, LOCKED, UNLOCKED
+const RULE_NAME_MAP = {
+  LOGIN_NEW_ACCESS: '신규 기기·IP 로그인',
+  WITHDRAW_LARGE: '고액·누적 출금',
+  TRADE_NEW_IP: '신규 IP 주식 주문',
+};
+
+export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify }) {
+  const [activeSection, setActiveSection] = useState('DETECTIONS'); // 'DETECTIONS' | 'RECONCILE' | 'RISK_STOCKS' | 'ACCOUNT_LOCK'
+
+  // 1) FDS 탐지 목록 상태
+  const [detections, setDetections] = useState([]);
+  const [ruleFilter, setRuleFilter] = useState('ALL'); // ALL, LOGIN_NEW_ACCESS, WITHDRAW_LARGE, TRADE_NEW_IP
+  const [chkFilter, setChkFilter] = useState('ALL'); // ALL, N, Y
   const [searchQuery, setSearchQuery] = useState('');
+  const [page, setPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalElements, setTotalElements] = useState(0);
+  const [loadingDetections, setLoadingDetections] = useState(false);
+  const [selectedDetection, setSelectedDetection] = useState(null);
+
+  // 실시간 긴급 경보 (rsltCd === 'LOCKED' 등) 및 시세 지연 알림 배너
+  const [emergencyAlerts, setEmergencyAlerts] = useState([]);
+  const [delayedStocksMap, setDelayedStocksMap] = useState({}); // { [tckCd]: { tckCd, tckNm, priceDelayed, prcTs } }
+  const [wsConnected, setWsConnected] = useState(false);
+
+  // 2) 위험 의심 종목 목록 (GET /api/v1/market/risk-stocks + /topic/risk)
+  const [riskStocks, setRiskStocks] = useState([]);
+  const [loadingRiskStocks, setLoadingRiskStocks] = useState(false);
+
+  // 3) 원장 대사 실행·이력·상세 상태 (POST/GET /api/v1/admin/reconcile, GET /{rcclRunNo})
   const [isAuditing, setIsAuditing] = useState(false);
-  const [auditResult, setAuditResult] = useState(null);
-  const [auditMessage, setAuditMessage] = useState('원장 전수 대사 대기 중 (실시간 원장 대사 즉시 실행 버튼 클릭)');
-  const [feedLatencyMs, setFeedLatencyMs] = useState(26);
+  const [reconcileRuns, setReconcileRuns] = useState([]);
+  const [rcclPage, setRcclPage] = useState(0);
+  const [rcclTotalPages, setRcclTotalPages] = useState(0);
+  const [selectedRunDetail, setSelectedRunDetail] = useState(null);
+  const [diffOnly, setDiffOnly] = useState(true);
+  const [loadingRunDetail, setLoadingRunDetail] = useState(false);
+  const [auditBannerMsg, setAuditBannerMsg] = useState('원장 대사 즉시 실행 또는 실행 이력을 확인하세요.');
 
-  // 실시간 시세 지연 경고 계산 (1분 이상 갱신 없을 시 경고, 기능 ID 98)
-  const isFeedDelayed = lastQuoteTime && (Date.now() - lastQuoteTime > 60000);
+  // 4) 계좌 번호 직접 잠금/해제 도구 상태 (PUT /api/v1/admin/accounts/{acntNo}/status)
+  const [targetAcntNo, setTargetAcntNo] = useState('');
+  const [targetStatCd, setTargetStatCd] = useState('LOCKED');
+  const [targetReason, setTargetReason] = useState('');
+  const [acntActionMsg, setAcntActionMsg] = useState('');
+  const [isChangingAcnt, setIsChangingAcnt] = useState(false);
 
-  const loadAlerts = async () => {
-    const res = await fetchServerAlerts();
-    if (res.success && res.alerts) {
-      setAlerts(res.alerts);
+  const loadDetections = useCallback(async (targetPage = page, targetRule = ruleFilter, targetChk = chkFilter) => {
+    setLoadingDetections(true);
+    try {
+      const res = await fetchAdminDetections({
+        ruleCd: targetRule === 'ALL' ? null : targetRule,
+        chkYn: targetChk === 'ALL' ? null : targetChk,
+        page: targetPage,
+        size: 20,
+      });
+      if (res.success) {
+        setDetections(res.content || []);
+        setTotalElements(Number(res.totalElements ?? 0));
+        setTotalPages(Number(res.totalPages ?? 1));
+      }
+    } finally {
+      setLoadingDetections(false);
     }
-  };
+  }, [page, ruleFilter, chkFilter]);
 
-  useEffect(() => {
-    loadAlerts();
-    const timer = setInterval(loadAlerts, 3000);
-    return () => clearInterval(timer);
+  const loadRiskStocks = useCallback(async () => {
+    setLoadingRiskStocks(true);
+    try {
+      const res = await fetchRiskStocks();
+      if (res.success) {
+        setRiskStocks(res.items || []);
+      }
+    } finally {
+      setLoadingRiskStocks(false);
+    }
   }, []);
 
-  const handleAction = async (alertId, actionType, adminComment) => {
-    const res = await updateAlertStatus(alertId, actionType, adminComment);
+  const loadReconcileHistory = useCallback(async (targetPage = rcclPage) => {
+    const res = await fetchAdminReconcileHistory({ page: targetPage, size: 15 });
     if (res.success) {
-      if (res.alerts) setAlerts(res.alerts);
-      else loadAlerts();
-      const actionName =
-        actionType === 'APPROVED' ? '수동 승인 (원장 체결)' :
-        actionType === 'REJECTED' ? '주문 거절 (취소)' :
-        actionType === 'UNLOCKED' ? '계좌 잠금 해제' : '계좌 잠금';
-      if (onNotify) {
-        onNotify(`[FDS 관제] 경보 ${alertId}에 대해 ${actionName} 조치가 성공적으로 원장에 반영되었습니다.`);
+      const list = res.content || [];
+      setReconcileRuns(list);
+      setRcclTotalPages(Number(res.totalPages ?? 1));
+      if (list.length > 0) {
+        const latest = list[0];
+        setAuditBannerMsg(
+          `최근 대사 #${latest.rcclRunNo} (${latest.rcclDt}, ${latest.trgDvCd}): 상태 ${latest.runStatCd} · 총 ${latest.totAcntCnt ?? 0}계좌 중 불일치 ${latest.diffAcntCnt ?? 0}건`
+        );
       }
-    } else {
-      alert(`[조치 실패] ${res.message || '서버 오류'}`);
+    }
+  }, [rcclPage]);
+
+  const loadReconcileDetail = async (rcclRunNo, onlyDiff = diffOnly) => {
+    if (!rcclRunNo) return;
+    setLoadingRunDetail(true);
+    try {
+      const res = await fetchAdminReconcileDetail(rcclRunNo, onlyDiff);
+      if (res.success && res.detail) {
+        setSelectedRunDetail(res.detail);
+      }
+    } finally {
+      setLoadingRunDetail(false);
     }
   };
 
-  const handleManualAudit = async () => {
+  // 초기 조회
+  useEffect(() => {
+    loadDetections(0, ruleFilter, chkFilter);
+  }, [ruleFilter, chkFilter]);
+
+  useEffect(() => {
+    loadRiskStocks();
+    loadReconcileHistory(0);
+  }, []);
+
+  // STOMP 관리자 채널 및 위험 종목 채널 실시간 구독 (/ws)
+  useEffect(() => {
+    const stomp = createStompManager({
+      withAuth: true,
+      onConnect: () => setWsConnected(true),
+      onReconnect: () => {
+        setWsConnected(true);
+        // 재연결 시 놓친 탐지·위험종목·대사이력 다시 조회
+        loadDetections(page, ruleFilter, chkFilter);
+        loadRiskStocks();
+        loadReconcileHistory(rcclPage);
+      },
+      onDisconnect: () => setWsConnected(false),
+    });
+
+    // 1. /topic/admin/detections: 신규 탐지 또는 AI 설명 상태 변경
+    const unsubDetections = stomp.subscribe('/topic/admin/detections', (payload) => {
+      if (!payload || !payload.dtcSeq) return;
+      if (payload.rsltCd === 'LOCKED') {
+        setEmergencyAlerts((prev) => {
+          const filtered = prev.filter((item) => item.dtcSeq !== payload.dtcSeq);
+          return [payload, ...filtered].slice(0, 5);
+        });
+        if (onNotify) {
+          onNotify(`🚨 [긴급 경보] 탐지 #${payload.dtcSeq} (${payload.ruleCd}) — 계좌 ${payload.acntNo || ''} 긴급 잠금(LOCKED) 발생!`);
+        }
+      }
+      // 선택된 모달의 aiStatCd 등 실시간 반영 및 목록 새로고침
+      setSelectedDetection((prev) =>
+        prev && (prev.dtcSeq === payload.dtcSeq || prev.id === payload.dtcSeq)
+          ? { ...prev, ...payload }
+          : prev
+      );
+      loadDetections(page, ruleFilter, chkFilter);
+    });
+
+    // 2. /topic/admin/market: 종목별 시세 지연 시작·해제 ({ tckCd, tckNm, priceDelayed, prcTs })
+    const unsubMarket = stomp.subscribe('/topic/admin/market', (payload) => {
+      if (!payload || !payload.tckCd) return;
+      setDelayedStocksMap((prev) => {
+        const next = { ...prev };
+        if (payload.priceDelayed) {
+          next[payload.tckCd] = payload;
+        } else {
+          delete next[payload.tckCd];
+        }
+        return next;
+      });
+    });
+
+    // 3. /topic/admin/reconcile: 원장 대사 불일치/실패 경보
+    const unsubReconcile = stomp.subscribe('/topic/admin/reconcile', (payload) => {
+      if (!payload) return;
+      setAuditBannerMsg(
+        `[대사 경보] 실행 #${payload.rcclRunNo} (${payload.rcclDt}): 상태 ${payload.runStatCd} · 총 ${payload.totAcntCnt ?? 0}계좌 중 불일치 ${payload.diffAcntCnt ?? 0}건 ${payload.failRsnCont || ''}`
+      );
+      if (onNotify) {
+        onNotify(`⚠️ [원장 대사 경보] 실행 #${payload.rcclRunNo} 결과 확인이 필요합니다 (${payload.runStatCd}).`);
+      }
+      loadReconcileHistory(0);
+    });
+
+    // 4. /topic/risk: 위험 의심 종목 목록 실시간 갱신
+    const unsubRisk = stomp.subscribe('/topic/risk', (payload) => {
+      if (Array.isArray(payload)) {
+        setRiskStocks(payload);
+      }
+    });
+
+    return () => {
+      unsubDetections();
+      unsubMarket();
+      unsubReconcile();
+      unsubRisk();
+      stomp.disconnect();
+    };
+  }, [page, ruleFilter, chkFilter, rcclPage]);
+
+  // 수동 원장 대사 실행: POST /api/v1/admin/reconcile
+  const handleManualReconcile = async () => {
     setIsAuditing(true);
     try {
-      const data = await runServerReconciliation();
-      setIsAuditing(false);
-      if (data.success) {
-        setAuditResult(data);
-        const count = data.discrepancyCount || 0;
-        if (count === 0) {
-          setAuditMessage(`수동 전수 대사 완료 (${data.timestamp}): 총 ${data.totalAccounts}개 계좌, 체결 주문 ${data.totalOrders}건 — 원장 일치율 100.00% (오차 0원)`);
-        } else {
-          setAuditMessage(`[주의] 전수 대사 완료 (${data.timestamp}): 총 ${data.totalAccounts}개 계좌 중 ${count}건의 원장 불일치 계좌 발견`);
-        }
+      const res = await runServerReconciliation();
+      if (res.success) {
+        const diffCnt = Number(res.diffAcntCnt ?? 0);
+        setAuditBannerMsg(
+          `수동 대사 실행 완료 (#${res.rcclRunNo}, ${res.rcclDt}): 상태 ${res.runStatCd} · 전체 ${res.totAcntCnt ?? 0}계좌 중 불일치 ${diffCnt}건`
+        );
         if (onNotify) {
-          onNotify(data.message);
+          onNotify(
+            diffCnt === 0
+              ? `[원장 대사] #${res.rcclRunNo} 완료 — 전체 ${res.totAcntCnt}계좌 100% 일치`
+              : `⚠️ [원장 대사] #${res.rcclRunNo} 완료 — 불일치 ${diffCnt}계좌 발견`
+          );
         }
+        await loadReconcileHistory(0);
+        await loadReconcileDetail(res.rcclRunNo, diffOnly);
+        setActiveSection('RECONCILE');
       } else {
-        setAuditMessage('원장 대사 실패: ' + (data.message || '오류'));
+        setAuditBannerMsg(`원장 대사 실행 실패: ${res.message || '오류'}`);
+        if (onNotify) onNotify(`[대사 실패] ${res.message}`);
       }
-    } catch (err) {
+    } finally {
       setIsAuditing(false);
-      setAuditMessage('원장 대사 통신 오류: ' + err.message);
     }
   };
 
-  const filteredAlerts = alerts.filter((a) => {
-    if (riskFilter !== 'ALL' && a.riskLevel !== riskFilter) return false;
-    if (statusFilter !== 'ALL' && a.status !== statusFilter) return false;
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const matchId = a.id?.toLowerCase().includes(q);
-      const matchStock = a.stockName?.toLowerCase().includes(q) || a.stockCode?.includes(q);
-      const matchUser = a.userId?.toLowerCase().includes(q) || a.accountNo?.includes(q);
-      if (!matchId && !matchStock && !matchUser) return false;
+  // 계좌 직접 잠금/해제 실행
+  const handleDirectAccountStatus = async (e) => {
+    e?.preventDefault();
+    setAcntActionMsg('');
+    const cleanAcnt = targetAcntNo.trim();
+    const cleanReason = targetReason.trim();
+    if (!cleanAcnt) {
+      setAcntActionMsg('계좌번호를 입력해 주세요.');
+      return;
     }
-    return true;
+    if (!cleanReason) {
+      setAcntActionMsg('조치 사유(메모)를 반드시 입력해 주세요.');
+      return;
+    }
+    setIsChangingAcnt(true);
+    try {
+      const res = await changeAdminAccountStatus(cleanAcnt, targetStatCd, cleanReason);
+      if (res.success) {
+        const msg = `계좌 ${res.data.acntNo} 상태가 ${res.data.acntStatCd}(으)로 변경되었습니다.`;
+        setAcntActionMsg(msg);
+        setTargetReason('');
+        if (onNotify) onNotify(`[계좌 조치] ${msg}`);
+      } else {
+        setAcntActionMsg(`실패: ${res.message}`);
+      }
+    } finally {
+      setIsChangingAcnt(false);
+    }
+  };
+
+  const delayedStocksList = Object.values(delayedStocksMap);
+
+  const filteredDetections = detections.filter((d) => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      String(d.dtcSeq || '').includes(q) ||
+      (d.ruleCd || '').toLowerCase().includes(q) ||
+      (d.mskLgnId || '').toLowerCase().includes(q) ||
+      (d.acntNo || '').toLowerCase().includes(q)
+    );
   });
 
-  const totalCount = alerts.length;
-  const holdCount = alerts.filter((a) => a.status === 'HOLD').length;
-  const criticalCount = alerts.filter((a) => a.riskLevel === 'CRITICAL').length;
-  const lockedCount = alerts.filter((a) => a.status === 'LOCKED').length;
+  const uncheckedCount = detections.filter((d) => d.chkYn === 'N').length;
+  const lockedResultCount = detections.filter((d) => d.rsltCd === 'LOCKED').length;
 
   return (
     <div className="admin-fds-view">
@@ -101,24 +307,27 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
             </div>
             <div>
               <div className="admin-title-row">
-                <h2>StockShield FDS 관제 센터</h2>
+                <h2>StockShield FDS 보안 관제 센터</h2>
                 <span className="live-pulse-badge">
-                  <span className="pulse-dot green" />
-                  실시간 관제 중 (LIVE)
+                  <span className={`pulse-dot ${wsConnected ? 'green' : 'amber'}`} />
+                  {wsConnected ? 'STOMP 실시간 연결됨 (/ws)' : 'STOMP 재연결 대기 중'}
                 </span>
-                {isFeedDelayed ? (
-                  <span className="feed-status-badge text-warning" style={{ background: '#451a1a', color: '#ff7070', borderColor: '#ff4444' }}>
+                {delayedStocksList.length > 0 ? (
+                  <span
+                    className="feed-status-badge text-warning"
+                    style={{ background: '#451a1a', color: '#ff7070', borderColor: '#ff4444' }}
+                  >
                     <AlertTriangle size={13} style={{ display: 'inline', marginRight: 4 }} />
-                    시세 피드 지연: <strong>60초 초과 경고</strong>
+                    시세 지연 종목: <strong>{delayedStocksList.length}개 (60초 초과)</strong>
                   </span>
                 ) : (
                   <span className="feed-status-badge">
-                    시세 피드 지연: <strong>{feedLatencyMs}ms</strong> (정상)
+                    시세 피드 상태: 정상
                   </span>
                 )}
               </div>
               <p className="admin-subtext">
-                초고속 매크로·계정 탈취·허수성 주문 등 자본시장 이상거래 실시간 탐지 및 AI 차단 시스템
+                FDS 규칙 탐지 확인(CHECK) · AI 사유 설명 · 계좌 잠금/해제 · 위험 의심 종목 · 원장 정합성 대사
               </p>
             </div>
           </div>
@@ -131,56 +340,86 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
             onClick={onBackToTrading}
           >
             <ArrowLeft size={16} />
-            <span>실시간 트레이딩 대시보드로 돌아가기</span>
+            <span>시세 대시보드 보기</span>
           </button>
         </div>
       </header>
 
+      {/* 긴급 경보 배너 (rsltCd === 'LOCKED' 실시간 수신 시 상단 고정 노출) */}
+      {emergencyAlerts.length > 0 && (
+        <div style={{ background: '#3b1219', border: '1px solid #ff4d64', borderRadius: '8px', padding: '12px 16px', marginBottom: '14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#ff8596', fontSize: '13px' }}>
+            <AlertOctagon size={18} />
+            <div>
+              <strong>🚨 실시간 긴급 경보 ({emergencyAlerts.length}건):</strong>{' '}
+              최근 탐지 #{emergencyAlerts[0].dtcSeq} ({RULE_NAME_MAP[emergencyAlerts[0].ruleCd] || emergencyAlerts[0].ruleCd}) — 계좌 {emergencyAlerts[0].acntNo || '-'} 자동 잠금(LOCKED)
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              type="button"
+              className="btn-table-action btn-urgent"
+              onClick={() => setSelectedDetection(emergencyAlerts[0])}
+            >
+              상세 확인
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              style={{ padding: '4px 10px', fontSize: '11px' }}
+              onClick={() => setEmergencyAlerts([])}
+            >
+              배너 닫기
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 관제 지표 요약 카드 그리드 */}
       <div className="admin-kpi-grid">
-        <div className="admin-kpi-card">
+        <div className="admin-kpi-card" onClick={() => setActiveSection('DETECTIONS')} style={{ cursor: 'pointer' }}>
           <div className="kpi-icon-wrap bg-blue">
             <Activity size={20} />
           </div>
           <div className="kpi-info">
-            <span className="kpi-title">금일 총 주문 모니터링</span>
-            <strong className="kpi-num">1,428건</strong>
-            <span className="kpi-trend text-muted">정상 처리율 98.7%</span>
+            <span className="kpi-title">총 FDS 탐지 기록</span>
+            <strong className="kpi-num">{totalElements.toLocaleString()}건</strong>
+            <span className="kpi-trend text-muted">신규접속 · 고액출금 · 신규IP주문</span>
           </div>
         </div>
 
-        <div className="admin-kpi-card">
-          <div className="kpi-icon-wrap bg-red">
-            <ShieldAlert size={20} />
-          </div>
-          <div className="kpi-info">
-            <span className="kpi-title">FDS 탐지 경보</span>
-            <strong className="kpi-num text-red">{totalCount}건</strong>
-            <span className="kpi-trend text-red">위험 등급 {criticalCount}건 포함</span>
-          </div>
-        </div>
-
-        <div className="admin-kpi-card highlight-card">
+        <div className="admin-kpi-card highlight-card" onClick={() => { setActiveSection('DETECTIONS'); setChkFilter('N'); }} style={{ cursor: 'pointer' }}>
           <div className="kpi-icon-wrap bg-amber">
             <AlertTriangle size={20} />
           </div>
           <div className="kpi-info">
-            <span className="kpi-title">심사 보류 대기 주문</span>
-            <strong className="kpi-num text-amber">{holdCount}건</strong>
+            <span className="kpi-title">현재 페이지 미확인 탐지</span>
+            <strong className="kpi-num text-amber">{uncheckedCount}건</strong>
             <span className="kpi-trend text-amber">
-              {holdCount > 0 ? '⚠️ 관리자 승인 대기 중' : '모든 경보 처리 완료'}
+              {uncheckedCount > 0 ? '⚠️ 관리자 확인(CHECK) 필요' : '현재 페이지 모두 확인 완료'}
             </span>
           </div>
         </div>
 
-        <div className="admin-kpi-card">
+        <div className="admin-kpi-card" onClick={() => setActiveSection('ACCOUNT_LOCK')} style={{ cursor: 'pointer' }}>
           <div className="kpi-icon-wrap bg-purple">
             <Lock size={20} />
           </div>
           <div className="kpi-info">
-            <span className="kpi-title">계좌 긴급 잠금 조치</span>
-            <strong className="kpi-num text-purple">{lockedCount}개 계좌</strong>
-            <span className="kpi-trend text-muted">탈취 의심 계좌 동결</span>
+            <span className="kpi-title">긴급 잠금(LOCKED) 탐지</span>
+            <strong className="kpi-num text-purple">{lockedResultCount}건</strong>
+            <span className="kpi-trend text-muted">클릭하여 계좌 잠금·해제 관리</span>
+          </div>
+        </div>
+
+        <div className="admin-kpi-card" onClick={() => setActiveSection('RISK_STOCKS')} style={{ cursor: 'pointer' }}>
+          <div className="kpi-icon-wrap bg-red">
+            <TrendingUp size={20} />
+          </div>
+          <div className="kpi-info">
+            <span className="kpi-title">실시간 위험 의심 종목</span>
+            <strong className="kpi-num text-red">{riskStocks.length}종목</strong>
+            <span className="kpi-trend text-red">급등(UP) · 급락(DOWN) 감지</span>
           </div>
         </div>
       </div>
@@ -189,200 +428,517 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
       <div className="integrity-banner">
         <div className="integrity-left">
           <div className="audit-icon-wrap">
-            <CheckCircle2 size={18} className={auditResult?.discrepancyCount > 0 ? 'text-amber' : 'text-green'} />
+            <CheckCircle2 size={18} className="text-green" />
           </div>
           <div>
-            <span className="audit-label">원장 무결성 및 정합성 점검 (실시간 수학적 전수 대사):</span>
-            <span className="audit-desc">{auditMessage}</span>
+            <span className="audit-label">원장 무결성 및 정합성 대사 (/api/v1/admin/reconcile):</span>
+            <span className="audit-desc">{auditBannerMsg}</span>
           </div>
         </div>
-        <button
-          type="button"
-          className="btn-manual-audit"
-          onClick={handleManualAudit}
-          disabled={isAuditing}
-        >
-          <RefreshCw size={13} className={isAuditing ? 'rotating' : ''} />
-          <span>{isAuditing ? '전수 대사 검증 중...' : '원장 전수 대사 즉시 실행'}</span>
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            type="button"
+            className="btn-secondary"
+            style={{ padding: '7px 12px', fontSize: '12px' }}
+            onClick={() => {
+              setActiveSection('RECONCILE');
+              loadReconcileHistory(0);
+            }}
+          >
+            대사 이력/상세 보기
+          </button>
+          <button
+            type="button"
+            className="btn-manual-audit"
+            onClick={handleManualReconcile}
+            disabled={isAuditing}
+          >
+            <RefreshCw size={13} className={isAuditing ? 'rotating' : ''} />
+            <span>{isAuditing ? '원장 대사 실행 중...' : '원장 전수 대사 즉시 실행'}</span>
+          </button>
+        </div>
       </div>
 
-      {/* 원장 불일치 계좌 발견 시 상세 내역 표시 */}
-      {auditResult?.discrepancies?.length > 0 && (
-        <div style={{ background: '#26171b', border: '1px solid #702e38', borderRadius: '8px', padding: '14px 18px', margin: '0 0 16px 0' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#ff7888', fontWeight: 700, fontSize: '13px', marginBottom: '8px' }}>
-            <AlertOctagon size={16} />
-            <span>원장 정합성 불일치 상세 분석 ({auditResult.discrepancyCount}건)</span>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '12px' }}>
-            {auditResult.discrepancies.map((d, i) => (
-              <div key={i} style={{ background: '#171118', padding: '10px 14px', borderRadius: '6px', borderLeft: '3px solid #ff5566' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                  <strong>계좌: {d.accountNo} ({d.userName} · @{d.userId})</strong>
-                  <span style={{ color: '#ff9090' }}>예수금 오차: ₩{d.balanceDiff?.toLocaleString()} (실제: ₩{d.actualBalance?.toLocaleString()} / 대사: ₩{d.expectedBalance?.toLocaleString()})</span>
-                </div>
-                {d.stockDiscrepancies?.length > 0 && (
-                  <div style={{ color: '#c7b0b5', fontSize: '11px' }}>
-                    보유주식 오차: {d.stockDiscrepancies.map((s, si) => `${s.stockName}(${s.stockCode}) 오차 ${s.diff}주 (실제: ${s.actualQuantity}주 / 체결원장: ${s.expectedQuantity}주)`).join(', ')}
-                  </div>
-                )}
+      {/* 상단 섹션 전환 탭 */}
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
+        {[
+          { key: 'DETECTIONS', label: `FDS 탐지 목록 (${totalElements})` },
+          { key: 'RISK_STOCKS', label: `위험 의심 종목 (${riskStocks.length})` },
+          { key: 'RECONCILE', label: `원장 대사 이력·상세 (${reconcileRuns.length})` },
+          { key: 'ACCOUNT_LOCK', label: '계좌 잠금·해제 관리' },
+        ].map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            className={`pill-btn ${activeSection === tab.key ? 'active' : ''}`}
+            style={{ padding: '8px 16px', fontSize: '12.5px', fontWeight: 700 }}
+            onClick={() => setActiveSection(tab.key)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* SECTION 1: FDS 탐지 목록 */}
+      {activeSection === 'DETECTIONS' && (
+        <div className="admin-main-section">
+          <div className="table-controls-bar">
+            <div className="control-group" style={{ flexWrap: 'wrap', gap: '10px' }}>
+              <div className="search-box">
+                <Search size={15} />
+                <input
+                  type="text"
+                  placeholder="탐지번호, 계좌번호, 마스킹ID 검색..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
               </div>
-            ))}
+
+              <div className="filter-pill-group">
+                <span className="pill-group-label">탐지 규칙(ruleCd):</span>
+                {[
+                  { code: 'ALL', label: '전체' },
+                  { code: 'LOGIN_NEW_ACCESS', label: '신규접속 로그인' },
+                  { code: 'WITHDRAW_LARGE', label: '고액 출금' },
+                  { code: 'TRADE_NEW_IP', label: '신규IP 주문' },
+                ].map((r) => (
+                  <button
+                    key={r.code}
+                    type="button"
+                    className={`pill-btn ${ruleFilter === r.code ? 'active' : ''}`}
+                    onClick={() => {
+                      setPage(0);
+                      setRuleFilter(r.code);
+                    }}
+                  >
+                    {r.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="filter-pill-group">
+                <span className="pill-group-label">확인 상태(chkYn):</span>
+                {[
+                  { code: 'ALL', label: '전체' },
+                  { code: 'N', label: '미확인 (N)' },
+                  { code: 'Y', label: '확인 완료 (Y)' },
+                ].map((st) => (
+                  <button
+                    key={st.code}
+                    type="button"
+                    className={`pill-btn ${chkFilter === st.code ? 'active' : ''}`}
+                    onClick={() => {
+                      setPage(0);
+                      setChkFilter(st.code);
+                    }}
+                  >
+                    {st.label}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                className="pill-btn"
+                onClick={() => loadDetections(page, ruleFilter, chkFilter)}
+                disabled={loadingDetections}
+              >
+                <RefreshCw size={13} className={loadingDetections ? 'rotating' : ''} /> 새로고침
+              </button>
+            </div>
+          </div>
+
+          <div className="admin-table-wrap">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>탐지 번호</th>
+                  <th>탐지 시각</th>
+                  <th>규칙 코드 (ruleCd)</th>
+                  <th>회원 ID (마스킹)</th>
+                  <th>계좌번호</th>
+                  <th>판정 결과 (rsltCd)</th>
+                  <th>확인 여부 (chkYn)</th>
+                  <th>상세 및 조치</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loadingDetections ? (
+                  <tr>
+                    <td colSpan="8" className="empty-table-cell">
+                      탐지 기록을 불러오는 중입니다...
+                    </td>
+                  </tr>
+                ) : filteredDetections.length === 0 ? (
+                  <tr>
+                    <td colSpan="8" className="empty-table-cell">
+                      조건에 해당하는 FDS 탐지 기록이 없습니다.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredDetections.map((d) => {
+                    const isUnchecked = d.chkYn === 'N';
+                    const isLockedResult = d.rsltCd === 'LOCKED';
+
+                    return (
+                      <tr key={d.dtcSeq} className={isUnchecked ? 'row-highlight-hold' : ''}>
+                        <td>
+                          <span className="alert-code">#{d.dtcSeq}</span>
+                        </td>
+                        <td className="time-col">{d.regTs}</td>
+                        <td>
+                          <strong>{RULE_NAME_MAP[d.ruleCd] || d.ruleCd}</strong>
+                          <span className="code-sub" style={{ display: 'block' }}>{d.ruleCd}</span>
+                        </td>
+                        <td>
+                          <strong>{d.mskLgnId || '-'}</strong>
+                        </td>
+                        <td>
+                          <span className="acc-sub">{d.acntNo || '-'}</span>
+                        </td>
+                        <td>
+                          <span
+                            className={`status-pill ${
+                              isLockedResult
+                                ? 'rejected'
+                                : d.rsltCd === 'PENDING'
+                                ? 'hold'
+                                : 'executed'
+                            }`}
+                          >
+                            {d.rsltCd}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`status-pill ${d.chkYn === 'Y' ? 'executed' : 'hold'}`}>
+                            {d.chkYn === 'Y' ? '확인 완료 (Y)' : '미확인 (N)'}
+                          </span>
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            className={`btn-table-action ${isUnchecked ? 'btn-urgent' : ''}`}
+                            onClick={() => setSelectedDetection(d)}
+                          >
+                            <Bot size={13} />
+                            <span>{isUnchecked ? '상세 확인·조치' : '상세 보기'}</span>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* 페이징 */}
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', padding: '14px' }}>
+            <button
+              type="button"
+              className="pill-btn"
+              disabled={page <= 0 || loadingDetections}
+              onClick={() => {
+                const next = page - 1;
+                setPage(next);
+                loadDetections(next, ruleFilter, chkFilter);
+              }}
+            >
+              <ChevronLeft size={14} /> 이전
+            </button>
+            <span style={{ fontSize: '12px', color: '#9cb3d0' }}>
+              {totalPages > 0 ? `${page + 1} / ${totalPages} 페이지` : '1 / 1 페이지'}
+            </span>
+            <button
+              type="button"
+              className="pill-btn"
+              disabled={page + 1 >= totalPages || loadingDetections}
+              onClick={() => {
+                const next = page + 1;
+                setPage(next);
+                loadDetections(next, ruleFilter, chkFilter);
+              }}
+            >
+              다음 <ChevronRight size={14} />
+            </button>
           </div>
         </div>
       )}
 
-      {/* 실시간 경보 스트림 & 필터 바 */}
-      <div className="admin-main-section">
-        <div className="table-controls-bar">
-          <div className="control-group">
-            <div className="search-box">
-              <Search size={15} />
-              <input
-                type="text"
-                placeholder="경보ID, 계좌번호, 종목명, 사용자 검색..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
+      {/* SECTION 2: 위험 의심 종목 목록 (/api/v1/market/risk-stocks & /topic/risk) */}
+      {activeSection === 'RISK_STOCKS' && (
+        <div className="admin-main-section">
+          <div className="table-controls-bar" style={{ justifyContent: 'space-between' }}>
+            <strong style={{ color: '#e5ecf4', fontSize: '14px' }}>
+              실시간 위험 의심 종목 목록 (급등 SURGE / 급락 PLUNGE)
+            </strong>
+            <button type="button" className="pill-btn" onClick={loadRiskStocks} disabled={loadingRiskStocks}>
+              <RefreshCw size={13} className={loadingRiskStocks ? 'rotating' : ''} /> 새로고침
+            </button>
+          </div>
+          <div className="admin-table-wrap">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>종목코드</th>
+                  <th>종목명</th>
+                  <th>방향 (dir)</th>
+                  <th>변동률 (chgRt)</th>
+                  <th>위험 판단 사유 (reason)</th>
+                  <th>탐지 시각 (dtcTs)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {riskStocks.length === 0 ? (
+                  <tr>
+                    <td colSpan="6" className="empty-table-cell">
+                      현재 감지된 위험 의심 종목이 없습니다 (또는 시세 60초 이상 지연 시 자동 비움).
+                    </td>
+                  </tr>
+                ) : (
+                  riskStocks.map((r) => (
+                    <tr key={r.tckCd}>
+                      <td><strong>{r.tckCd}</strong></td>
+                      <td><strong>{r.tckNm}</strong></td>
+                      <td>
+                        <span className={`type-tag ${r.dir === 'UP' || r.dir === 'SURGE' ? 'buy' : 'sell'}`}>
+                          {r.dir === 'UP' || r.dir === 'SURGE' ? '급등 (UP)' : '급락 (DOWN)'}
+                        </span>
+                      </td>
+                      <td>
+                        <strong className={Number(r.chgRt) >= 0 ? 'rise' : 'fall'}>
+                          {Number(r.chgRt) >= 0 ? '+' : ''}{Number(r.chgRt).toFixed(2)}%
+                        </strong>
+                      </td>
+                      <td>{r.reason}</td>
+                      <td className="time-col">{r.dtcTs}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* SECTION 3: 원장 대사 실행 이력 및 상세 (/api/v1/admin/reconcile) */}
+      {activeSection === 'RECONCILE' && (
+        <div className="admin-main-section" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', padding: '16px' }}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <strong style={{ color: '#e5ecf4', fontSize: '14px' }}>원장 대사 실행 이력</strong>
+              <button type="button" className="pill-btn" onClick={() => loadReconcileHistory(rcclPage)}>
+                <RefreshCw size={13} /> 새로고침
+              </button>
+            </div>
+            <div className="admin-table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>실행번호</th>
+                    <th>일자 / 구분</th>
+                    <th>상태</th>
+                    <th>전체 / 불일치</th>
+                    <th>실행 시각</th>
+                    <th>상세</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reconcileRuns.length === 0 ? (
+                    <tr>
+                      <td colSpan="6" className="empty-table-cell">대사 실행 이력이 없습니다.</td>
+                    </tr>
+                  ) : (
+                    reconcileRuns.map((run) => (
+                      <tr key={run.rcclRunNo} className={run.diffAcntCnt > 0 || run.runStatCd === 'FAILED' ? 'row-highlight-hold' : ''}>
+                        <td><strong>#{run.rcclRunNo}</strong></td>
+                        <td>
+                          <div>{run.rcclDt}</div>
+                          <small style={{ color: '#8fa0b5' }}>{run.trgDvCd}</small>
+                        </td>
+                        <td>
+                          <span className={`status-pill ${run.runStatCd === 'DONE' ? 'executed' : run.runStatCd === 'FAILED' ? 'rejected' : 'hold'}`}>
+                            {run.runStatCd}
+                          </span>
+                        </td>
+                        <td>
+                          {run.totAcntCnt ?? 0} / <strong style={{ color: run.diffAcntCnt > 0 ? '#ff6b7b' : '#4cd49e' }}>{run.diffAcntCnt ?? 0}</strong>
+                        </td>
+                        <td className="time-col">{run.regTs}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn-table-action"
+                            onClick={() => loadReconcileDetail(run.rcclRunNo, diffOnly)}
+                          >
+                            상세 조회
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <strong style={{ color: '#e5ecf4', fontSize: '14px' }}>
+                {selectedRunDetail
+                  ? `대사 #${selectedRunDetail.rcclRunNo} 상세 결과 (${selectedRunDetail.rcclDt} · ${selectedRunDetail.runStatCd})`
+                  : '대사 상세 결과 (좌측에서 실행 이력을 선택하세요)'}
+              </strong>
+              {selectedRunDetail && (
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button
+                    type="button"
+                    className={`pill-btn ${diffOnly ? 'active' : ''}`}
+                    onClick={() => {
+                      setDiffOnly(true);
+                      loadReconcileDetail(selectedRunDetail.rcclRunNo, true);
+                    }}
+                  >
+                    불일치만(diffOnly=true)
+                  </button>
+                  <button
+                    type="button"
+                    className={`pill-btn ${!diffOnly ? 'active' : ''}`}
+                    onClick={() => {
+                      setDiffOnly(false);
+                      loadReconcileDetail(selectedRunDetail.rcclRunNo, false);
+                    }}
+                  >
+                    전체 항목(diffOnly=false)
+                  </button>
+                </div>
+              )}
             </div>
 
-            <div className="filter-pill-group">
-              <span className="pill-group-label">위험 등급:</span>
-              {['ALL', 'CRITICAL', 'WARNING', 'CAUTION'].map((lvl) => (
-                <button
-                  key={lvl}
-                  type="button"
-                  className={`pill-btn ${riskFilter === lvl ? 'active' : ''}`}
-                  onClick={() => setRiskFilter(lvl)}
-                >
-                  {lvl === 'ALL' ? '전체' : lvl}
-                </button>
-              ))}
-            </div>
-
-            <div className="filter-pill-group">
-              <span className="pill-group-label">조치 상태:</span>
-              {['ALL', 'HOLD', 'APPROVED', 'REJECTED', 'LOCKED'].map((st) => (
-                <button
-                  key={st}
-                  type="button"
-                  className={`pill-btn ${statusFilter === st ? 'active' : ''}`}
-                  onClick={() => setStatusFilter(st)}
-                >
-                  {st === 'ALL' ? '전체' :
-                   st === 'HOLD' ? '보류' :
-                   st === 'APPROVED' ? '승인' :
-                   st === 'REJECTED' ? '거절' : '계좌잠금'}
-                </button>
-              ))}
+            <div className="admin-table-wrap">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>계좌번호</th>
+                    <th>점검 항목</th>
+                    <th>종목코드</th>
+                    <th>기대값(expVal)</th>
+                    <th>실제값(actlVal)</th>
+                    <th>불일치(diffYn)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loadingRunDetail ? (
+                    <tr>
+                      <td colSpan="6" className="empty-table-cell">상세 결과를 불러오는 중입니다...</td>
+                    </tr>
+                  ) : !selectedRunDetail ? (
+                    <tr>
+                      <td colSpan="6" className="empty-table-cell">좌측 목록에서 [상세 조회]를 클릭하세요.</td>
+                    </tr>
+                  ) : (selectedRunDetail.results || []).length === 0 ? (
+                    <tr>
+                      <td colSpan="6" className="empty-table-cell">
+                        {diffOnly ? '불일치 항목이 없습니다 (원장 100% 일치).' : '점검 결과 항목이 없습니다.'}
+                      </td>
+                    </tr>
+                  ) : (
+                    selectedRunDetail.results.map((item, idx) => (
+                      <tr key={`${item.acntNo}-${item.chkItemCd}-${item.tckCd || idx}`}>
+                        <td><code>{item.acntNo}</code></td>
+                        <td>{item.chkItemCd}</td>
+                        <td>{item.tckCd || '-'}</td>
+                        <td>{Number(item.expVal ?? 0).toLocaleString('ko-KR')}</td>
+                        <td>{Number(item.actlVal ?? 0).toLocaleString('ko-KR')}</td>
+                        <td>
+                          <span className={`status-pill ${item.diffYn === 'Y' ? 'rejected' : 'executed'}`}>
+                            {item.diffYn}
+                          </span>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
+      )}
 
-        {/* FDS 경보 목록 테이블 */}
-        <div className="admin-table-wrap">
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>경보 ID</th>
-                <th>발생 시각</th>
-                <th>계좌 / 사용자</th>
-                <th>대상 종목</th>
-                <th>주문 내역</th>
-                <th>총 주문 금액</th>
-                <th>위험 점수</th>
-                <th>주요 이상 징후 (Triggers)</th>
-                <th>조치 상태</th>
-                <th>관리자 조치</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredAlerts.length === 0 ? (
-                <tr>
-                  <td colSpan="10" className="empty-table-cell">
-                    조건에 해당하는 FDS 탐지 경보가 없습니다.
-                  </td>
-                </tr>
-              ) : (
-                filteredAlerts.map((a) => {
-                  const isHold = a.status === 'HOLD';
-                  const isCritical = a.riskLevel === 'CRITICAL';
-
-                  return (
-                    <tr key={a.id} className={isHold ? 'row-highlight-hold' : ''}>
-                      <td>
-                        <span className="alert-code">#{a.id}</span>
-                      </td>
-                      <td className="time-col">{a.timestamp}</td>
-                      <td>
-                        <div className="user-cell">
-                          <strong>{a.userName}</strong>
-                          <span className="acc-sub">{a.accountNo}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <strong>{a.stockName}</strong>
-                        <span className="code-sub">{a.stockCode}</span>
-                      </td>
-                      <td>
-                        <span className={`type-tag ${a.orderType === 'BUY' ? 'buy' : 'sell'}`}>
-                          {a.orderType === 'BUY' ? '매수' : '매도'}
-                        </span>
-                        <span className="qty-tag">{a.quantity?.toLocaleString()}주 @ ₩{a.price?.toLocaleString()}</span>
-                      </td>
-                      <td className="amount-col">
-                        <strong>₩{a.totalAmount?.toLocaleString()}</strong>
-                      </td>
-                      <td>
-                        <div className="risk-score-wrap">
-                          <span className={`risk-badge-mini ${a.riskLevel.toLowerCase()}`}>
-                            {a.riskScore}점
-                          </span>
-                          <div className="risk-progress-bar">
-                            <div
-                              className={`risk-fill ${a.riskLevel.toLowerCase()}`}
-                              style={{ width: `${a.riskScore}%` }}
-                            />
-                          </div>
-                        </div>
-                      </td>
-                      <td className="triggers-cell">
-                        <span className="trigger-snippet" title={a.triggers?.join('\n')}>
-                          {a.triggers?.[0] || '이상 거래 의심'}
-                        </span>
-                      </td>
-                      <td>
-                        <span className={`status-pill ${a.status.toLowerCase()}`}>
-                          {a.status === 'HOLD' ? '심사 보류' :
-                           a.status === 'APPROVED' ? '승인 체결' :
-                           a.status === 'REJECTED' ? '주문 차단' : '계좌 잠금'}
-                        </span>
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className={`btn-table-action ${isHold ? 'btn-urgent' : ''}`}
-                          onClick={() => setSelectedAlert(a)}
-                        >
-                          <Bot size={13} />
-                          <span>{isHold ? 'AI 분석 및 조치' : '상세 보기'}</span>
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+      {/* SECTION 4: 계좌 직접 잠금·해제 관리 (PUT /api/v1/admin/accounts/{acntNo}/status) */}
+      {activeSection === 'ACCOUNT_LOCK' && (
+        <div className="admin-main-section" style={{ padding: '22px', maxWidth: '580px' }}>
+          <h3 style={{ color: '#e5ecf4', fontSize: '16px', marginBottom: '8px' }}>
+            계좌 상태 직접 변경 (잠금 LOCKED / 해제 ACTIVE)
+          </h3>
+          <p style={{ color: '#8fa0b5', fontSize: '12.5px', marginBottom: '16px' }}>
+            탐지 상세 모달뿐 아니라 계좌번호를 직접 지정하여 잠금(`LOCKED`) 또는 잠금 해제(`ACTIVE`) 조치를 수행할 수 있습니다.
+          </p>
+          {acntActionMsg && (
+            <div style={{ background: '#182b3e', border: '1px solid #355880', borderRadius: '6px', padding: '10px 14px', marginBottom: '14px', color: '#b8d9ff', fontSize: '12.5px' }}>
+              {acntActionMsg}
+            </div>
+          )}
+          <form onSubmit={handleDirectAccountStatus} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div className="form-group">
+              <label htmlFor="admin-acnt-no">대상 계좌번호 (acntNo)</label>
+              <div className="form-control">
+                <input
+                  id="admin-acnt-no"
+                  type="text"
+                  value={targetAcntNo}
+                  onChange={(e) => setTargetAcntNo(e.target.value)}
+                  placeholder="예: 10000000018"
+                  required
+                />
+              </div>
+            </div>
+            <div className="form-group">
+              <label>변경할 상태 (acntStatCd)</label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  className={`pill-btn ${targetStatCd === 'LOCKED' ? 'active' : ''}`}
+                  onClick={() => setTargetStatCd('LOCKED')}
+                >
+                  <Lock size={13} /> 계좌 잠금 (LOCKED)
+                </button>
+                <button
+                  type="button"
+                  className={`pill-btn ${targetStatCd === 'ACTIVE' ? 'active' : ''}`}
+                  onClick={() => setTargetStatCd('ACTIVE')}
+                >
+                  <Unlock size={13} /> 잠금 해제 (ACTIVE)
+                </button>
+              </div>
+            </div>
+            <div className="form-group">
+              <label htmlFor="admin-acnt-reason">조치 사유 메모 (actRsnCont, 필수)</label>
+              <div className="form-control">
+                <input
+                  id="admin-acnt-reason"
+                  type="text"
+                  value={targetReason}
+                  onChange={(e) => setTargetReason(e.target.value)}
+                  placeholder="예: 고객 본인 확인 완료 후 잠금 해제"
+                  required
+                />
+              </div>
+            </div>
+            <button type="submit" className="primary-btn" disabled={isChangingAcnt}>
+              {isChangingAcnt ? '처리 중...' : `계좌 ${targetStatCd} 조치 실행`}
+            </button>
+          </form>
         </div>
-      </div>
+      )}
 
-      {/* 경보 상세 및 AI 분석/조치 모달 (SCR-06) */}
+      {/* 탐지 상세 및 AI 설명 / 확인 완료 / 계좌 잠금·해제 모달 */}
       <AlertDetailModal
-        alert={selectedAlert}
-        isOpen={Boolean(selectedAlert)}
-        onClose={() => setSelectedAlert(null)}
-        onAction={handleAction}
+        alert={selectedDetection}
+        isOpen={Boolean(selectedDetection)}
+        onClose={() => setSelectedDetection(null)}
+        onUpdated={() => loadDetections(page, ruleFilter, chkFilter)}
+        onNotify={onNotify}
       />
     </div>
   );

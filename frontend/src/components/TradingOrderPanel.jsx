@@ -8,14 +8,14 @@ import {
   Clock3,
   AlertTriangle,
   XCircle,
+  Lock,
   Minus, 
   Plus,
   RefreshCw,
-  Sparkles
 } from 'lucide-react';
 import { executeOrder } from '../utils/storage';
 
-const won = (x) => Math.round(x).toLocaleString('ko-KR');
+const won = (x) => Math.round(Number(x || 0)).toLocaleString('ko-KR');
 
 export default function TradingOrderPanel({ 
   stock, 
@@ -23,40 +23,42 @@ export default function TradingOrderPanel({
   onOrderSuccess,
   orderType = 'BUY',
   setOrderType,
-  orderPrice = null,
-  setOrderPrice,
-  isHighlighted = false
+  isHighlighted = false,
 }) {
-  const [pricingMode, setPricingMode] = useState('LIMIT'); // 'LIMIT' or 'MARKET'
-  const [price, setPrice] = useState(stock ? stock.price : 70000);
   const [quantity, setQuantity] = useState(1);
   const [errorMsg, setErrorMsg] = useState('');
-  const [isSuccess, setIsSuccess] = useState(false);
-  const [lastExecutedOrder, setLastExecutedOrder] = useState(null);
+  const [errorCode, setErrorCode] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [lastOrderOutcome, setLastOrderOutcome] = useState(null); // { order, status, code, message, replayed }
 
-  // 종목 또는 외부 지정 가격이 변경될 때 상태 동기화
+  // 종목 변경 시 입력 초기화
   useEffect(() => {
     if (stock) {
-      setPrice(orderPrice || stock.price);
       setErrorMsg('');
-      setIsSuccess(false);
+      setErrorCode('');
+      setLastOrderOutcome(null);
     }
-  }, [stock?.code, orderPrice]);
+  }, [stock?.code]);
 
   if (!stock) return null;
 
   const currentHolding = currentUser?.portfolio?.[stock.code] || { quantity: 0, avgPrice: 0 };
-  const effectivePrice = pricingMode === 'MARKET' ? stock.price : Number(price) || stock.price;
+  const effectivePrice = Number(stock.price) || 0;
   const totalAmount = effectivePrice * (Number(quantity) || 0);
+  const isPriceDelayed = Boolean(stock.priceDelayed);
+  const isAccountLocked = Boolean(currentUser?.isLocked);
 
   // 최대 매수 가능 수량
-  const maxBuyQty = Math.max(0, Math.floor((currentUser?.balance || 0) / (effectivePrice || 1)));
+  const maxBuyQty = effectivePrice > 0
+    ? Math.max(0, Math.floor((currentUser?.balance || 0) / effectivePrice))
+    : 0;
   // 최대 매도 가능 수량
   const maxSellQty = currentHolding.quantity || 0;
 
   // 비율 퀵 버튼 클릭
   const handleQuickPercent = (pct) => {
     setErrorMsg('');
+    setErrorCode('');
     if (orderType === 'BUY') {
       const targetQty = Math.floor(maxBuyQty * (pct / 100));
       setQuantity(Math.max(1, targetQty));
@@ -68,22 +70,16 @@ export default function TradingOrderPanel({
 
   // 수량 증감
   const adjustQty = (delta) => {
+    setErrorMsg('');
+    setErrorCode('');
     setQuantity((prev) => Math.max(1, Number(prev || 1) + delta));
   };
 
-  // 가격 증감
-  const adjustPrice = (delta) => {
-    if (pricingMode === 'MARKET') return;
-    const newPrice = Math.max(100, Number(price || stock.price) + delta);
-    setPrice(newPrice);
-    if (setOrderPrice) setOrderPrice(newPrice);
-  };
-
-  // 주문 실행
-  // 주문 실행
+  // 시장가 주문 실행: POST /api/v1/orders { tckCd, ordDvCd, ordQty, idmpKey }
   const handleExecute = async (e) => {
-    e.preventDefault();
+    e?.preventDefault();
     setErrorMsg('');
+    setErrorCode('');
 
     if (!currentUser) {
       setErrorMsg('주문하려면 먼저 로그인해야 합니다.');
@@ -91,47 +87,52 @@ export default function TradingOrderPanel({
     }
 
     const numQty = Number(quantity);
-    if (!Number.isInteger(numQty) || numQty <= 0) {
-      setErrorMsg('주문 수량은 1주 이상의 정수만 입력할 수 있습니다.');
+    if (!Number.isInteger(numQty) || numQty <= 0 || numQty > 1000000) {
+      setErrorMsg('주문 수량은 1주 이상 1,000,000주 이하의 정수만 입력할 수 있습니다.');
       return;
     }
 
-    if (!Number.isFinite(effectivePrice) || effectivePrice <= 0) {
-      setErrorMsg('주문 단가가 올바르지 않습니다.');
-      return;
-    }
-
-    if (orderType === 'BUY' && totalAmount > (currentUser.balance || 0)) {
-      setErrorMsg(`주문 가능 금액이 부족합니다. (필요: ₩${won(totalAmount)}, 잔고: ₩${won(currentUser.balance)})`);
-      return;
-    }
-
-    if (orderType === 'SELL' && numQty > maxSellQty) {
-      setErrorMsg(`매도 가능 수량이 부족합니다. (보유: ${maxSellQty}주, 요청: ${numQty}주)`);
-      return;
-    }
-
+    setIsSubmitting(true);
     try {
       const res = await executeOrder({
-        userId: currentUser.id,
-        stockCode: stock.code,
+        tckCd: stock.code,
         stockName: stock.name,
-        orderType,
-        price: effectivePrice,
-        quantity: numQty
+        ordDvCd: orderType,
+        ordQty: numQty,
       });
 
-      if (res.success) {
-        setLastExecutedOrder(res.order);
-        setIsSuccess(true);
+      if (res.success && res.order) {
+        setLastOrderOutcome({
+          order: res.order,
+          status: 'FILLED',
+          code: null,
+          message: res.message,
+          replayed: res.replayed,
+        });
         if (onOrderSuccess) {
           onOrderSuccess(res.user, res.message);
         }
+      } else if (res.isRejected && res.order) {
+        // 422 / 423 저장된 업무 거절 (ACCOUNT_LOCKED, MARKET_CLOSED, PRICE_STALE, INSUFFICIENT_BALANCE, INSUFFICIENT_HOLDING)
+        setLastOrderOutcome({
+          order: res.order,
+          status: 'REJECTED',
+          code: res.code,
+          message: res.message,
+          replayed: res.replayed,
+        });
+        if (onOrderSuccess && res.user) {
+          onOrderSuccess(res.user, `[주문 거절] ${res.message}`);
+        }
       } else {
+        setErrorCode(res.code || '');
         setErrorMsg(res.message || '주문 처리에 실패했습니다.');
       }
     } catch (err) {
-      setErrorMsg('주문 전송 중 오류가 발생했습니다: ' + err.message);
+      setErrorCode('NETWORK_ERROR');
+      setErrorMsg('주문 전송 중 통신 오류가 발생했습니다: ' + err.message);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -142,7 +143,7 @@ export default function TradingOrderPanel({
         <div className="order-stock-meta">
           <span
             className="company-logo"
-            style={{ background: stock.color + '25', color: stock.color }}
+            style={{ background: (stock.color || '#6c85f7') + '25', color: stock.color || '#6c85f7' }}
           >
             {stock.name.slice(0, 1)}
           </span>
@@ -151,19 +152,35 @@ export default function TradingOrderPanel({
               {stock.name} <small>{stock.code}</small>
             </h3>
             <div className="order-curr-price">
-              <strong>₩{won(stock.price)}</strong>
-              <span className={stock.change >= 0 ? 'rise' : 'fall'}>
-                {stock.change >= 0 ? <ArrowUpRight size={13} /> : <ArrowDownLeft size={13} />}
-                {stock.change >= 0 ? '+' : ''}{stock.change.toFixed(2)}%
-              </span>
+              <strong>{effectivePrice > 0 ? `₩${won(effectivePrice)}` : '시세 대기 중'}</strong>
+              {stock.change != null && (
+                <span className={stock.change >= 0 ? 'rise' : 'fall'}>
+                  {stock.change >= 0 ? <ArrowUpRight size={13} /> : <ArrowDownLeft size={13} />}
+                  {stock.change >= 0 ? '+' : ''}{Number(stock.change).toFixed(2)}%
+                </span>
+              )}
             </div>
           </div>
         </div>
 
-        <div className="order-fds-tag" title="StockShield FDS 실시간 검증">
-          <ShieldCheck size={13} /> FDS 검증
+        <div className="order-fds-tag" title="StockShield 실시간 시장가 체결">
+          <ShieldCheck size={13} /> 시장가 전용
         </div>
       </div>
+
+      {/* 계좌 잠금 또는 시세 지연 경고 배너 */}
+      {isAccountLocked && (
+        <div style={{ background: '#3b161c', border: '1px solid #ff4d64', borderRadius: '6px', padding: '8px 10px', marginBottom: '10px', fontSize: '11.5px', color: '#ff8596', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Lock size={14} style={{ flexShrink: 0 }} />
+          <span>계좌 잠금 상태 ({currentUser.acntStatCd}): {currentUser.lockReason || '관리자에게 문의하세요.'}</span>
+        </div>
+      )}
+      {!isAccountLocked && isPriceDelayed && (
+        <div style={{ background: '#332714', border: '1px solid #f1cc62', borderRadius: '6px', padding: '8px 10px', marginBottom: '10px', fontSize: '11.5px', color: '#f1cc62', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Clock3 size={14} style={{ flexShrink: 0 }} />
+          <span>시세가 60초 이상 지연되어 주문 시 거절(PRICE_STALE)될 수 있습니다.</span>
+        </div>
+      )}
 
       {/* 매수 / 매도 탭 전환 */}
       <div className="order-type-tabs">
@@ -173,7 +190,8 @@ export default function TradingOrderPanel({
           onClick={() => {
             if (setOrderType) setOrderType('BUY');
             setErrorMsg('');
-            setIsSuccess(false);
+            setErrorCode('');
+            setLastOrderOutcome(null);
           }}
         >
           매수 (BUY)
@@ -184,130 +202,101 @@ export default function TradingOrderPanel({
           onClick={() => {
             if (setOrderType) setOrderType('SELL');
             setErrorMsg('');
-            setIsSuccess(false);
+            setErrorCode('');
+            setLastOrderOutcome(null);
           }}
         >
           매도 (SELL)
         </button>
       </div>
 
-      {isSuccess && lastExecutedOrder ? (
-        /* 주문 처리 결과 화면 (EXECUTED / HOLD / REJECTED / CANCELLED 상태별 명확한 분기) */
+      {lastOrderOutcome ? (
+        /* 주문 처리 결과 화면 (FILLED 체결 / REJECTED 거절 사유별 구분 표시) */
         (() => {
-          const status = lastExecutedOrder.status || (
-            lastExecutedOrder.fdsStatus?.includes('보류') ? 'HOLD' :
-            (lastExecutedOrder.fdsStatus?.includes('차단') || lastExecutedOrder.fdsStatus?.includes('거절')) ? 'REJECTED' : 'EXECUTED'
-          );
-          const orderType = lastExecutedOrder.orderType || lastExecutedOrder.order_type || 'BUY';
-          const stockName = lastExecutedOrder.stockName || lastExecutedOrder.stock_name || stock?.name || '';
-          const quantity = Number(lastExecutedOrder.quantity || 1);
-          const price = Number(lastExecutedOrder.price || 0);
-          const totalCost = Number(lastExecutedOrder.totalCost ?? lastExecutedOrder.total_cost ?? (price * quantity));
-          const fdsStatus = lastExecutedOrder.fdsStatus || lastExecutedOrder.fds_status || 'FDS 분석 완료';
-          const rejectionReason = lastExecutedOrder.rejectionReason || lastExecutedOrder.rejection_reason || '';
+          const { order, status, code, message, replayed } = lastOrderOutcome;
+          const isFilled = status === 'FILLED' || order.ordStatCd === 'FILLED' || order.status === 'EXECUTED';
+          const ordDvCd = order.ordDvCd || order.orderType || 'BUY';
+          const stockName = order.tckNm || order.stockName || stock?.name || '';
+          const qty = Number(order.ordQty ?? order.quantity ?? 1);
+          const prc = Number(order.ordPrc ?? order.price ?? effectivePrice);
+          const trdAmt = Number(order.trdAmt ?? order.totalCost ?? prc * qty);
+          const rjctCode = code || order.rjctRsnCd || 'REJECTED';
+          const rjctMsg = message || order.rjctRsnMsg || order.rejectionReason || '';
 
           return (
-            <div className={`order-result-box ${status.toLowerCase()}`}>
-              {status === 'EXECUTED' && (
+            <div className={`order-result-box ${isFilled ? 'executed' : 'rejected'}`}>
+              {isFilled ? (
                 <>
                   <div className="order-result-icon executed">
                     <CheckCircle2 size={40} />
                   </div>
-                  <h3 className="order-result-title text-green">모의 주문 체결 완료!</h3>
+                  <h3 className="order-result-title text-green">시장가 주문 체결 완료 (FILLED)</h3>
                   <p className="order-result-msg">
-                    <strong>{stockName}</strong> {quantity}주{' '}
-                    <b className={orderType === 'BUY' ? 'rise' : 'fall'}>
-                      {orderType === 'BUY' ? '매수' : '매도'}
+                    <strong>{stockName}</strong> {qty.toLocaleString()}주{' '}
+                    <b className={ordDvCd === 'BUY' ? 'rise' : 'fall'}>
+                      {ordDvCd === 'BUY' ? '매수' : '매도'}
                     </b>{' '}
-                    체결되었습니다.
+                    즉시 체결되었습니다.
                   </p>
                 </>
-              )}
-
-              {status === 'HOLD' && (
-                <>
-                  <div className="order-result-icon hold">
-                    <Clock3 size={40} />
-                  </div>
-                  <h3 className="order-result-title text-amber">주문 접수 완료 (FDS 심사 보류)</h3>
-                  <p className="order-result-msg">
-                    <strong>{stockName}</strong> {quantity}주{' '}
-                    <b className={orderType === 'BUY' ? 'rise' : 'fall'}>
-                      {orderType === 'BUY' ? '매수' : '매도'}
-                    </b>{' '}
-                    주문이 <strong>FDS 심사 보류</strong> 상태로 접수되었습니다.
-                  </p>
-                  <div className="order-status-notice hold">
-                    <strong>⚠️ FDS 이상거래 심사 대기 안내</strong>
-                    <p>
-                      {rejectionReason || '단시간 대량 주문 또는 이상거래 패턴이 감지되어 관리자 승인 대기 중입니다. 보안관제팀 확인 후 즉시 체결됩니다. (접수 30분 미처리 시 자동 취소)'}
-                    </p>
-                  </div>
-                </>
-              )}
-
-              {status === 'REJECTED' && (
+              ) : (
                 <>
                   <div className="order-result-icon rejected">
-                    <AlertTriangle size={40} />
+                    {rjctCode === 'ACCOUNT_LOCKED' ? <Lock size={40} /> :
+                     rjctCode === 'PRICE_STALE' ? <Clock3 size={40} /> :
+                     <XCircle size={40} />}
                   </div>
-                  <h3 className="order-result-title text-red">FDS 위험 주문 차단 (주문 거절)</h3>
+                  <h3 className="order-result-title text-red">
+                    {rjctCode === 'ACCOUNT_LOCKED' ? '계좌 잠금으로 주문 거절' :
+                     rjctCode === 'PRICE_STALE' ? '시세 지연으로 주문 거절' :
+                     rjctCode === 'MARKET_CLOSED' ? '장 운영 시간 외 주문 거절' :
+                     rjctCode === 'INSUFFICIENT_BALANCE' ? '예수금 부족 주문 거절' :
+                     rjctCode === 'INSUFFICIENT_HOLDING' ? '보유 수량 부족 주문 거절' :
+                     '주문 거절 (REJECTED)'}
+                  </h3>
                   <p className="order-result-msg">
-                    <strong>{stockName}</strong> {quantity}주{' '}
-                    <b className={orderType === 'BUY' ? 'rise' : 'fall'}>
-                      {orderType === 'BUY' ? '매수' : '매도'}
+                    <strong>{stockName}</strong> {qty.toLocaleString()}주{' '}
+                    <b className={ordDvCd === 'BUY' ? 'rise' : 'fall'}>
+                      {ordDvCd === 'BUY' ? '매수' : '매도'}
                     </b>{' '}
-                    주문이 <strong>FDS 고위험 차단</strong>되었습니다.
+                    주문이 거절되었습니다.
                   </p>
                   <div className="order-status-notice rejected">
-                    <strong>⛔ 주문 차단 및 계좌 잠금 안내</strong>
-                    <p>
-                      {rejectionReason || 'FDS 위험점수 초과(80점 이상)로 주문이 차단되었으며 안전을 위해 계좌가 긴급 잠금되었습니다. 관제팀 소명 후 해제 가능합니다.'}
-                    </p>
+                    <strong>거절 사유 ({rjctCode})</strong>
+                    <p>{rjctMsg}</p>
                   </div>
-                </>
-              )}
-
-              {status === 'CANCELLED' && (
-                <>
-                  <div className="order-result-icon cancelled">
-                    <XCircle size={40} />
-                  </div>
-                  <h3 className="order-result-title text-gray">주문 취소 및 만료</h3>
-                  <p className="order-result-msg">
-                    <strong>{stockName}</strong> {quantity}주 주문이 취소 또는 시간 초과로 만료되었습니다.
-                  </p>
                 </>
               )}
 
               <div className="order-summary-table">
                 <div>
+                  <span>주문 번호</span>
+                  <b>{order.ordNo || order.id}</b>
+                </div>
+                <div>
                   <span>주문 상태</span>
-                  <span className={`order-status-tag ${status.toLowerCase()}`}>
-                    {status === 'EXECUTED' && '체결 완료 (EXECUTED)'}
-                    {status === 'HOLD' && '심사 보류 (HOLD)'}
-                    {status === 'REJECTED' && '주문 거절 (REJECTED)'}
-                    {status === 'CANCELLED' && '주문 취소 (CANCELLED)'}
+                  <span className={`order-status-tag ${isFilled ? 'executed' : 'rejected'}`}>
+                    {isFilled ? '체결 완료 (FILLED)' : `주문 거절 (${rjctCode})`}
                   </span>
                 </div>
                 <div>
-                  <span>{status === 'EXECUTED' ? '체결 단가' : '접수 단가'}</span>
-                  <b>₩{won(price)}</b>
+                  <span>{isFilled ? '체결 단가' : '기준 단가'}</span>
+                  <b>{prc > 0 ? `₩${won(prc)}` : '-'}</b>
                 </div>
                 <div>
-                  <span>{status === 'EXECUTED' ? '체결 수량' : '주문 수량'}</span>
-                  <b>{quantity}주</b>
+                  <span>주문 수량</span>
+                  <b>{qty.toLocaleString()}주</b>
                 </div>
                 <div>
-                  <span>{status === 'EXECUTED' ? '총 체결 금액' : '주문 금액'}</span>
-                  <b className="accent-price">₩{won(totalCost)}</b>
+                  <span>{isFilled ? '총 체결 금액' : '주문 금액'}</span>
+                  <b className="accent-price">{trdAmt > 0 ? `₩${won(trdAmt)}` : '-'}</b>
                 </div>
-                <div>
-                  <span>FDS 보안 상태</span>
-                  <span className="fds-badge-pill">
-                    <ShieldCheck size={12} /> {fdsStatus}
-                  </span>
-                </div>
+                {replayed && (
+                  <div>
+                    <span>멱등 재응답</span>
+                    <span className="fds-badge-pill">동일 주문키 중복 방지됨</span>
+                  </div>
+                )}
               </div>
 
               <div className="modal-actions" style={{ marginTop: '16px' }}>
@@ -316,7 +305,7 @@ export default function TradingOrderPanel({
                   className="primary-btn"
                   style={{ flex: 1 }}
                   onClick={() => {
-                    setIsSuccess(false);
+                    setLastOrderOutcome(null);
                     setQuantity(1);
                   }}
                 >
@@ -327,103 +316,55 @@ export default function TradingOrderPanel({
           );
         })()
       ) : (
-        /* 주문 입력 폼 */
+        /* 시장가 주문 입력 폼 */
         <form onSubmit={handleExecute} className="order-form-body">
           {errorMsg && (
-            <div className="form-alert error">
-              <AlertCircle size={15} />
-              <span>{errorMsg}</span>
+            <div className="form-alert error" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '6px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <AlertCircle size={15} />
+                <span>{errorMsg}</span>
+              </div>
+              {(errorCode === 'NETWORK_ERROR' || errorCode === 'LOCK_TIMEOUT' || errorCode === 'PRICE_UNAVAILABLE' || errorCode === 'SERVICE_UNAVAILABLE') && (
+                <button
+                  type="button"
+                  onClick={handleExecute}
+                  disabled={isSubmitting}
+                  style={{ background: '#2d3f5e', border: '1px solid #4a6899', color: '#fff', borderRadius: '4px', padding: '4px 10px', fontSize: '11px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                >
+                  <RefreshCw size={12} /> 같은 주문 키로 안전하게 재시도
+                </button>
+              )}
             </div>
           )}
 
-          {/* 주문 구분: 지정가 vs 시장가 */}
+          {/* 주문 구분: 최신 명세에 맞춰 시장가 주문만 제공 */}
           <div className="order-mode-row">
-            <span className="mode-label">주문 구분</span>
+            <span className="mode-label">주문 방식</span>
             <div className="mode-selector">
               <button
                 type="button"
-                className={pricingMode === 'LIMIT' ? 'active' : ''}
-                onClick={() => setPricingMode('LIMIT')}
+                className="active"
+                style={{ width: '100%' }}
               >
-                지정가
-              </button>
-              <button
-                type="button"
-                className={pricingMode === 'MARKET' ? 'active' : ''}
-                onClick={() => {
-                  setPricingMode('MARKET');
-                  setPrice(stock.price);
-                  if (setOrderPrice) setOrderPrice(stock.price);
-                }}
-              >
-                시장가
+                시장가 (서버 최신 시세 즉시 체결)
               </button>
             </div>
           </div>
 
-          {/* 주문 단가 */}
+          {/* 예상 체결 단가 (읽기 전용 표시) */}
           <div className="order-field-group">
             <div className="field-title-row">
-              <label htmlFor="order-panel-price">주문 단가 (KRW)</label>
-              {pricingMode === 'MARKET' && (
-                <span className="market-note">현재가 즉시 체결</span>
-              )}
+              <label>현재 기준 단가 (KRW)</label>
+              <span className="market-note">서버 Redis 실시간 시세 기준</span>
             </div>
             <div className="stepper-input-wrap">
-              <button
-                type="button"
-                className="step-calc-btn"
-                onClick={() => adjustPrice(-100)}
-                disabled={pricingMode === 'MARKET'}
-                aria-label="가격 100원 감소"
-              >
-                <Minus size={14} />
-              </button>
               <input
-                id="order-panel-price"
-                type="number"
-                value={pricingMode === 'MARKET' ? stock.price : price}
-                onChange={(e) => {
-                  const val = Number(e.target.value) || '';
-                  setPrice(val);
-                  if (setOrderPrice) setOrderPrice(val);
-                }}
-                disabled={pricingMode === 'MARKET'}
+                type="text"
+                value={effectivePrice > 0 ? `₩${won(effectivePrice)}` : '시세 조회 중'}
+                disabled
                 className="order-number-input"
               />
-              <button
-                type="button"
-                className="step-calc-btn"
-                onClick={() => adjustPrice(100)}
-                disabled={pricingMode === 'MARKET'}
-                aria-label="가격 100원 증가"
-              >
-                <Plus size={14} />
-              </button>
             </div>
-            {pricingMode === 'LIMIT' && (
-              <div className="quick-ticks">
-                {[-1000, -500, +500, +1000].map((delta) => (
-                  <button
-                    type="button"
-                    key={delta}
-                    onClick={() => adjustPrice(delta)}
-                  >
-                    {delta > 0 ? `+${won(delta)}` : won(delta)}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  className="reset-price"
-                  onClick={() => {
-                    setPrice(stock.price);
-                    if (setOrderPrice) setOrderPrice(stock.price);
-                  }}
-                >
-                  현재가
-                </button>
-              </div>
-            )}
           </div>
 
           {/* 주문 수량 */}
@@ -432,8 +373,8 @@ export default function TradingOrderPanel({
               <label htmlFor="order-panel-qty">주문 수량 (주)</label>
               <span className="qty-avail">
                 {orderType === 'BUY'
-                  ? `매수가능: 최대 ${maxBuyQty}주`
-                  : `매도가능: ${maxSellQty}주`}
+                  ? `매수가능: 최대 ${maxBuyQty.toLocaleString()}주`
+                  : `매도가능: ${maxSellQty.toLocaleString()}주`}
               </span>
             </div>
             <div className="stepper-input-wrap">
@@ -449,8 +390,13 @@ export default function TradingOrderPanel({
                 id="order-panel-qty"
                 type="number"
                 min="1"
+                max="1000000"
                 value={quantity}
-                onChange={(e) => setQuantity(Math.max(1, Number(e.target.value) || 1))}
+                onChange={(e) => {
+                  setErrorMsg('');
+                  setErrorCode('');
+                  setQuantity(Math.max(1, Number(e.target.value) || 1));
+                }}
                 className="order-number-input"
               />
               <button
@@ -491,7 +437,7 @@ export default function TradingOrderPanel({
           {/* 금액 계산 요약 카드 */}
           <div className="order-calc-card">
             <div className="calc-row">
-              <span>총 주문 금액</span>
+              <span>예상 주문 금액</span>
               <strong className={orderType === 'BUY' ? 'rise' : 'fall'}>
                 ₩{won(totalAmount)}
               </strong>
@@ -501,7 +447,7 @@ export default function TradingOrderPanel({
               <span>₩{won(currentUser?.balance || 0)}</span>
             </div>
             <div className="calc-row sub">
-              <span>주문 후 잔액</span>
+              <span>주문 후 예상 잔액</span>
               <span>
                 ₩{won(
                   orderType === 'BUY'
@@ -514,7 +460,7 @@ export default function TradingOrderPanel({
               <div className="calc-row sub highlight">
                 <span>현재 보유</span>
                 <span>
-                  {currentHolding.quantity}주 (평단 ₩{won(currentHolding.avgPrice)})
+                  {currentHolding.quantity.toLocaleString()}주 (평단 ₩{won(currentHolding.avgPrice)})
                 </span>
               </div>
             )}
@@ -523,10 +469,12 @@ export default function TradingOrderPanel({
           {/* 주문 실행 버튼 */}
           <button
             type="submit"
+            disabled={isSubmitting}
             className={`order-submit-btn ${orderType === 'BUY' ? 'buy' : 'sell'}`}
           >
-            ₩{won(totalAmount)}{' '}
-            {orderType === 'BUY' ? '매수 주문 실행' : '매도 주문 실행'}
+            {isSubmitting
+              ? '시장가 주문 처리 중...'
+              : `₩${won(totalAmount)} 시장가 ${orderType === 'BUY' ? '매수' : '매도'} 주문`}
           </button>
         </form>
       )}
