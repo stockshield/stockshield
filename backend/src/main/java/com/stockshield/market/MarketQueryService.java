@@ -2,12 +2,14 @@ package com.stockshield.market;
 
 import java.io.IOException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -85,16 +87,20 @@ public class MarketQueryService {
         List<JsonNode> prices = readAll(PriceCache.PRICE_KEY);
         boolean delayed = isDelayed(prices);
 
+        List<Map<String, Object>> riskStocks = delayed ? List.of() : riskList(names);
+        Set<String> risky = new HashSet<>();
+        riskStocks.forEach(r -> risky.add((String) r.get("tckCd")));
+
         Map<String, Object> ranks = new LinkedHashMap<>();
-        ranks.put("rise", top(prices, names, Comparator.comparingDouble((JsonNode p) -> p.path("chgRt").asDouble()).reversed()));
-        ranks.put("fall", top(prices, names, Comparator.comparingDouble((JsonNode p) -> p.path("chgRt").asDouble())));
-        ranks.put("volume", top(prices, names, Comparator.comparingLong((JsonNode p) -> p.path("totalTrdVol").asLong()).reversed()));
+        ranks.put("rise", top(prices, names, risky, Comparator.comparingDouble((JsonNode p) -> p.path("chgRt").asDouble()).reversed()));
+        ranks.put("fall", top(prices, names, risky, Comparator.comparingDouble((JsonNode p) -> p.path("chgRt").asDouble())));
+        ranks.put("volume", top(prices, names, risky, Comparator.comparingLong((JsonNode p) -> p.path("totalTrdVol").asLong()).reversed()));
 
         Map<String, Object> s = new LinkedHashMap<>();
         s.put("kospi", readOne(PriceCache.INDEX_KEY + KOSPI).map(MarketQueryService::indexView).orElse(null));
         s.put("kosdaq", readOne(PriceCache.INDEX_KEY + KOSDAQ).map(MarketQueryService::indexView).orElse(null));
         s.put("topRanks", ranks);
-        s.put("riskStocks", delayed ? List.of() : riskList(names));
+        s.put("riskStocks", riskStocks);
         s.put("priceDelayed", delayed);
         s.put("updTs", LocalDateTime.now(clock).format(ISO));
         return s;
@@ -127,7 +133,7 @@ public class MarketQueryService {
         d.put("chgRt", price.map(p -> p.path("chgRt").decimalValue()).orElse(null));
         d.put("totalTrdVol", price.map(p -> p.path("totalTrdVol").asLong()).orElse(null));
         d.put("prcTs", price.map(p -> p.path("prcTs").asText()).orElse(null));
-        d.put("priceDelayed", isDelayed(readAll(PriceCache.PRICE_KEY)));
+        d.put("priceDelayed", price.map(this::isStale).orElse(true));
         d.put("chart", chart(tckCd));
         d.put("risk", riskView);
         return d;
@@ -187,8 +193,9 @@ public class MarketQueryService {
 
     // ------------------------------------------------------------------ 공통
 
-    private List<Map<String, Object>> top(List<JsonNode> prices, Map<String, String> names, Comparator<JsonNode> order) {
-        Set<String> risky = riskCodes();
+    /** 순위 항목의 riskYn은 같은 응답의 riskStocks에 있는 종목만 Y (회신 8번 답 2) */
+    private List<Map<String, Object>> top(List<JsonNode> prices, Map<String, String> names, Set<String> risky,
+                                          Comparator<JsonNode> order) {
         return prices.stream().sorted(order).limit(TOP_N).map(p -> {
             String code = p.path("tckCd").asText();
             Map<String, Object> m = new LinkedHashMap<>();
@@ -203,13 +210,6 @@ public class MarketQueryService {
         }).toList();
     }
 
-    private Set<String> riskCodes() {
-        Set<String> keys = scanKeys(StockRiskJudge.RISK_KEY);
-        Set<String> codes = new HashSet<>();
-        keys.forEach(k -> codes.add(k.substring(StockRiskJudge.RISK_KEY.length())));
-        return codes;
-    }
-
     private boolean isDelayed(List<JsonNode> prices) {
         return prices.stream().noneMatch(p -> !isStale(p));
     }
@@ -218,10 +218,33 @@ public class MarketQueryService {
         try {
             LocalDateTime ts = OffsetDateTime.parse(price.path("prcTs").asText())
                     .atZoneSameInstant(KST).toLocalDateTime();
-            return !ts.isAfter(LocalDateTime.now(clock).minus(StockRiskJudge.STALE_AFTER));
+            return isStale(ts, LocalDateTime.now(clock));
         } catch (RuntimeException e) {
             return true;
         }
+    }
+
+    /** 60초를 넘겨야 지연. 정확히 60초는 지연이 아니다 (주문 PriceReader와 같은 기준, TRD_ORD_001 #2, SYS_CORE_001 #6) */
+    public static boolean isStale(LocalDateTime prcTs, LocalDateTime now) {
+        return Duration.between(prcTs, now).compareTo(StockRiskJudge.STALE_AFTER) > 0;
+    }
+
+    /** 종목 하나의 시세 상태 (관제 시세 지연 경고용) */
+    public record PriceStatus(String tckCd, String tckNm, String prcTs, boolean delayed) {
+    }
+
+    /** 서비스 대상 전 종목(stock_master)의 시세 시각과 지연 여부. 시세가 없으면 지연 */
+    public List<PriceStatus> priceStatuses() {
+        Map<String, String> names = stockNames();
+        Map<String, JsonNode> byCode = new HashMap<>();
+        readAll(PriceCache.PRICE_KEY).forEach(p -> byCode.put(p.path("tckCd").asText(), p));
+        List<PriceStatus> out = new ArrayList<>();
+        names.forEach((code, name) -> {
+            JsonNode p = byCode.get(code);
+            out.add(new PriceStatus(code, name, p == null ? null : p.path("prcTs").asText(null),
+                    p == null || isStale(p)));
+        });
+        return out;
     }
 
     private Map<String, String> stockNames() {

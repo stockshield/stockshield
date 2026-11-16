@@ -1,5 +1,13 @@
 package com.stockshield.market;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
@@ -7,7 +15,19 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.Clock;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.util.List;
+import java.util.Map;
+
+import org.mockito.ArgumentCaptor;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
+import org.springframework.messaging.simp.SimpMessageSendingOperations;
+
+import com.stockshield.fds.risk.StockRiskJudge;
+import com.stockshield.order.MarketHours;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 
@@ -48,6 +68,8 @@ class MarketControllerTest extends IntegrationTestSupport {
     @Autowired MockMvc mvc;
     @Autowired StringRedisTemplate redis;
     @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired MarketQueryService queryService;
+    @Autowired StockRiskJudge riskJudge;
 
     @BeforeEach
     void setUp() {
@@ -104,9 +126,75 @@ class MarketControllerTest extends IntegrationTestSupport {
         risk("Q00001", "UP", "12", "전일 대비 +12.00%");
         mvc.perform(get("/api/v1/market/summary"))
                 .andExpect(jsonPath("$.priceDelayed").value(true))
-                .andExpect(jsonPath("$.riskStocks", hasSize(0)));
+                .andExpect(jsonPath("$.riskStocks", hasSize(0)))
+                // 순위의 riskYn도 riskStocks와 같게 N (회신 8번 답 2)
+                .andExpect(jsonPath("$.topRanks.rise[0].tckCd").value("Q00001"))
+                .andExpect(jsonPath("$.topRanks.rise[0].riskYn").value("N"));
         mvc.perform(get("/api/v1/market/risk-stocks")).andExpect(jsonPath("$", hasSize(0)));
-        mvc.perform(get("/api/v1/market/stocks/Q00001")).andExpect(jsonPath("$.risk.riskYn").value("N"));
+        mvc.perform(get("/api/v1/market/stocks/Q00001"))
+                .andExpect(jsonPath("$.risk.riskYn").value("N"))
+                .andExpect(jsonPath("$.priceDelayed").value(true));
+    }
+
+    @Test
+    @DisplayName("종목 상세의 priceDelayed는 그 종목의 시세 기준: 다른 종목이 새로워도 이 종목이 60초 넘게 끊기면 true, 정확히 60초는 false")
+    void detailDelayedPerStock() throws Exception {
+        price("Q00001", 10_000, 1, 1000, now());
+        price("Q00002", 20_000, 1, 1000, ago(61));
+        price("Q00003", 30_000, 1, 1000, ago(59));
+        mvc.perform(get("/api/v1/market/stocks/Q00001")).andExpect(jsonPath("$.priceDelayed").value(false));
+        mvc.perform(get("/api/v1/market/stocks/Q00002")).andExpect(jsonPath("$.priceDelayed").value(true));
+        mvc.perform(get("/api/v1/market/stocks/Q00003")).andExpect(jsonPath("$.priceDelayed").value(false));
+        mvc.perform(get("/api/v1/market/stocks/Q00004")).andExpect(jsonPath("$.priceDelayed").value(true));
+    }
+
+    @Test
+    @DisplayName("관제 시세 지연 경고: 종목별로 지연 시작·해제 때만 보내고, 장 운영 시간 밖에서는 보내지 않는다")
+    void adminMarketDelayPerStock() {
+        SimpMessageSendingOperations ops = mock(SimpMessageSendingOperations.class);
+        StaticListableBeanFactory beans = new StaticListableBeanFactory();
+        beans.addBean("ops", ops);
+        MarketBroadcaster open = new MarketBroadcaster(beans.getBeanProvider(SimpMessageSendingOperations.class),
+                riskJudge, queryService, new MarketHours(true, ""), Clock.systemDefaultZone());
+
+        price("Q00001", 10_000, 1, 1000, now());
+        price("Q00002", 20_000, 1, 1000, ago(120));
+        open.checkDelay();
+        assertThat(adminMessagesFor(ops, "Q00001")).isEmpty();
+        assertThat(adminMessagesFor(ops, "Q00002")).singleElement().satisfies(m -> {
+            assertThat(m.get("tckNm")).isEqualTo("큐종목2");
+            assertThat(m.get("priceDelayed")).isEqualTo(true);
+            assertThat(m.get("prcTs")).isNotNull();
+        });
+
+        clearInvocations(ops);
+        open.checkDelay();   // 바뀐 것이 없으면 보내지 않는다
+        assertThat(adminMessagesFor(ops, "Q00002")).isEmpty();
+
+        price("Q00002", 20_100, 1, 1000, now());
+        open.checkDelay();
+        assertThat(adminMessagesFor(ops, "Q00002")).singleElement()
+                .satisfies(m -> assertThat(m.get("priceDelayed")).isEqualTo(false));
+
+        // 일요일 낮(장 운영 시간 밖)에는 판단하지 않는다
+        SimpMessageSendingOperations closedOps = mock(SimpMessageSendingOperations.class);
+        StaticListableBeanFactory closedBeans = new StaticListableBeanFactory();
+        closedBeans.addBean("ops", closedOps);
+        Clock sunday = Clock.fixed(LocalDateTime.of(2026, 11, 15, 11, 0).atZone(ZoneId.of("Asia/Seoul")).toInstant(),
+                ZoneId.of("Asia/Seoul"));
+        MarketBroadcaster closed = new MarketBroadcaster(closedBeans.getBeanProvider(SimpMessageSendingOperations.class),
+                riskJudge, queryService, new MarketHours(false, ""), sunday);
+        price("Q00003", 30_000, 1, 1000, ago(600));
+        closed.checkDelay();
+        verify(closedOps, never()).convertAndSend(eq(MarketBroadcaster.ADMIN_MARKET_TOPIC), any(Object.class));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> adminMessagesFor(SimpMessageSendingOperations ops, String code) {
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(ops, atLeast(0)).convertAndSend(eq(MarketBroadcaster.ADMIN_MARKET_TOPIC), captor.capture());
+        return captor.getAllValues().stream().map(o -> (Map<String, Object>) o)
+                .filter(m -> code.equals(m.get("tckCd"))).toList();
     }
 
     @Test
@@ -147,6 +235,10 @@ class MarketControllerTest extends IntegrationTestSupport {
 
     private static String now() {
         return OffsetDateTime.now(ZoneOffset.ofHours(9)).truncatedTo(ChronoUnit.SECONDS).toString();
+    }
+
+    private static String ago(int seconds) {
+        return OffsetDateTime.now(ZoneOffset.ofHours(9)).minusSeconds(seconds).truncatedTo(ChronoUnit.SECONDS).toString();
     }
 
     private void stock(String code, String name) {
