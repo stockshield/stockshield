@@ -26,6 +26,8 @@ export default function OrderModal({
   initialOrderType = 'BUY',
 }) {
   const [orderType, setOrderType] = useState(initialOrderType);
+  const [priceMode, setPriceMode] = useState('MARKET');
+  const [limitPrice, setLimitPrice] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [errorMsg, setErrorMsg] = useState('');
   const [errorCode, setErrorCode] = useState('');
@@ -35,6 +37,8 @@ export default function OrderModal({
   useEffect(() => {
     if (stock && isOpen) {
       setQuantity(1);
+      setPriceMode('MARKET');
+      setLimitPrice(Number(stock.price || 0));
       setErrorMsg('');
       setErrorCode('');
       setLastOrderOutcome(null);
@@ -45,7 +49,8 @@ export default function OrderModal({
   if (!isOpen || !stock) return null;
 
   const currentHolding = currentUser?.portfolio?.[stock.code] || { quantity: 0, avgPrice: 0 };
-  const effectivePrice = Number(stock.price) || 0;
+  const marketPrice = Number(stock.price) || 0;
+  const effectivePrice = priceMode === 'LIMIT' ? (Number(limitPrice) || marketPrice) : marketPrice;
   const totalAmount = effectivePrice * (Number(quantity) || 0);
 
   const maxBuyQty = effectivePrice > 0
@@ -73,6 +78,11 @@ export default function OrderModal({
     e?.preventDefault();
     setErrorMsg('');
     setErrorCode('');
+
+    if (priceMode === 'LIMIT') {
+      setErrorMsg('현재 백엔드 서버는 시장가 즉시 체결만 지원합니다. 시장가를 선택해 주문해 주세요.');
+      return;
+    }
 
     if (!currentUser) {
       setErrorMsg('주문하려면 먼저 로그인해야 합니다.');
@@ -293,12 +303,50 @@ export default function OrderModal({
 
             <div className="order-mode-row">
               <span className="mode-label">주문 방식</span>
-              <div className="mode-selector">
-                <button type="button" className="active" style={{ width: '100%' }}>
-                  시장가 (서버 현재가 즉시 체결)
+              <div className="mode-selector" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                <button
+                  type="button"
+                  className={priceMode === 'MARKET' ? 'active' : ''}
+                  onClick={() => {
+                    setPriceMode('MARKET');
+                    setErrorMsg('');
+                  }}
+                >
+                  시장가
+                </button>
+                <button
+                  type="button"
+                  className={priceMode === 'LIMIT' ? 'active' : ''}
+                  onClick={() => {
+                    setPriceMode('LIMIT');
+                    if (!limitPrice && marketPrice > 0) setLimitPrice(marketPrice);
+                    setErrorMsg('');
+                  }}
+                >
+                  지정가
                 </button>
               </div>
             </div>
+
+            {priceMode === 'LIMIT' && (
+              <div className="order-field-group">
+                <div className="field-title-row">
+                  <label htmlFor="modal-limit-price">지정 단가 (KRW)</label>
+                  <span className="market-note">서버 미지원 (시장가만 체결)</span>
+                </div>
+                <div className="stepper-input-wrap">
+                  <input
+                    id="modal-limit-price"
+                    type="number"
+                    min="1"
+                    step="100"
+                    value={limitPrice || ''}
+                    onChange={(e) => setLimitPrice(Math.max(0, Number(e.target.value) || 0))}
+                    className="order-number-input"
+                  />
+                </div>
+              </div>
+            )}
 
             <div className="order-field-group">
               <div className="field-title-row">

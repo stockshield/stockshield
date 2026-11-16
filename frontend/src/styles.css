@@ -804,6 +804,9 @@ input:focus-visible {
 .content {
   padding: 16px 20px 24px;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .welcome {
@@ -938,7 +941,7 @@ input:focus-visible {
 /* Trading Grid & Stock Overview */
 .trading-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 290px;
+  grid-template-columns: minmax(0, 1fr) clamp(200px, 27%, 290px);
   gap: 14px;
   align-items: stretch;
 }
@@ -960,6 +963,13 @@ input:focus-visible {
   flex-direction: column;
   gap: 14px;
   min-width: 0;
+  height: 100%;
+}
+
+.chart-column .chart-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .panel {
@@ -974,22 +984,28 @@ input:focus-visible {
   justify-content: space-between;
   align-items: center;
   flex-wrap: nowrap;
-  padding: 10px 14px;
+  padding: 12px 22px;
   min-height: auto;
-  gap: 12px;
+  gap: 20px;
 }
 
 .stock-overview-main {
   display: flex;
   align-items: center;
-  gap: 14px;
+  justify-content: space-between;
+  width: 100%;
+  gap: 24px;
   flex-wrap: nowrap;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
 .stock-overview-meta {
-  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -1009,8 +1025,8 @@ input:focus-visible {
 .stock-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin: 4px 0 0;
+  gap: 8px;
+  margin: 0;
   flex-wrap: nowrap;
 }
 
@@ -1046,11 +1062,13 @@ input:focus-visible {
 .stock-overview-price {
   flex: 0 0 auto;
   min-width: 0;
-  padding-left: 14px;
+  padding-left: 20px;
   border-left: 1px solid #23344a;
   display: flex;
-  flex-direction: column;
-  justify-content: center;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 14px;
+  justify-content: flex-end;
 }
 
 .big-price {
@@ -1194,6 +1212,66 @@ input:focus-visible {
   margin-left: 4px;
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
+}
+
+/* 차트 카드 내부 OHLC + 거래량 한 줄 스트립 */
+.chart-ohlc-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+  border-top: 1px solid #223042;
+  background: #121a26;
+  flex-wrap: wrap;
+}
+
+.chart-ohlc-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: #8aa1be;
+  white-space: nowrap;
+}
+
+.chart-ohlc-date strong {
+  color: #d8e7fa;
+  font-weight: 700;
+}
+
+.chart-ohlc-items {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.chart-ohlc-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.chart-ohlc-item > span {
+  color: #788ca5;
+  font-weight: 600;
+}
+
+.chart-ohlc-item > b {
+  color: #e2ecf7;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-ohlc-item > b.rise {
+  color: #f06770;
+}
+
+.chart-ohlc-item > b.fall {
+  color: #4d9cf2;
 }
 
 /* --- Candle Chart --- */
@@ -1357,6 +1435,9 @@ input:focus-visible {
 
 .chart-wrap {
   width: 100%;
+  flex: 1;
+  display: flex;
+  align-items: stretch;
 }
 
 .candle-svg {
@@ -1592,6 +1673,7 @@ input:focus-visible {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-width: 0;
   box-sizing: border-box;
 }
 

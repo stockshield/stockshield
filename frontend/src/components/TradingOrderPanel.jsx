@@ -23,8 +23,13 @@ export default function TradingOrderPanel({
   onOrderSuccess,
   orderType = 'BUY',
   setOrderType,
+  orderPrice = null,
+  balanceCard = null,
+  isMarketOpen = true,
   isHighlighted = false,
 }) {
+  const [priceMode, setPriceMode] = useState('MARKET'); // 'MARKET' | 'LIMIT'
+  const [limitPrice, setLimitPrice] = useState(() => Number(orderPrice || stock?.price || 0));
   const [quantity, setQuantity] = useState(1);
   const [errorMsg, setErrorMsg] = useState('');
   const [errorCode, setErrorCode] = useState('');
@@ -37,13 +42,21 @@ export default function TradingOrderPanel({
       setErrorMsg('');
       setErrorCode('');
       setLastOrderOutcome(null);
+      setLimitPrice(Number(orderPrice || stock.price || 0));
     }
   }, [stock?.code]);
+
+  useEffect(() => {
+    if (orderPrice) {
+      setLimitPrice(Number(orderPrice));
+    }
+  }, [orderPrice]);
 
   if (!stock) return null;
 
   const currentHolding = currentUser?.portfolio?.[stock.code] || { quantity: 0, avgPrice: 0 };
-  const effectivePrice = Number(stock.price) || 0;
+  const marketPrice = Number(stock.price) || 0;
+  const effectivePrice = priceMode === 'LIMIT' ? (Number(limitPrice) || marketPrice) : marketPrice;
   const totalAmount = effectivePrice * (Number(quantity) || 0);
   const isPriceDelayed = Boolean(stock.priceDelayed);
   const isAccountLocked = Boolean(currentUser?.isLocked);
@@ -80,6 +93,11 @@ export default function TradingOrderPanel({
     e?.preventDefault();
     setErrorMsg('');
     setErrorCode('');
+
+    if (priceMode === 'LIMIT') {
+      setErrorMsg('현재 백엔드 서버는 시장가 즉시 체결만 지원합니다. 시장가를 선택해 주문해 주세요.');
+      return;
+    }
 
     if (!currentUser) {
       setErrorMsg('주문하려면 먼저 로그인해야 합니다.');
@@ -138,47 +156,14 @@ export default function TradingOrderPanel({
 
   return (
     <div className={`trading-order-panel panel ${isHighlighted ? 'order-highlight-active' : ''}`}>
-      {/* 패널 헤더: 선택 종목 및 현재가 정보 */}
-      <div className="order-panel-header">
-        <div className="order-stock-meta">
-          <span
-            className="company-logo"
-            style={{ background: (stock.color || '#6c85f7') + '25', color: stock.color || '#6c85f7' }}
-          >
-            {stock.name.slice(0, 1)}
-          </span>
-          <div>
-            <h3 className="panel-stock-title">
-              {stock.name} <small>{stock.code}</small>
-            </h3>
-            <div className="order-curr-price">
-              <strong>{effectivePrice > 0 ? `₩${won(effectivePrice)}` : '시세 대기 중'}</strong>
-              {stock.change != null && (
-                <span className={stock.change >= 0 ? 'rise' : 'fall'}>
-                  {stock.change >= 0 ? <ArrowUpRight size={13} /> : <ArrowDownLeft size={13} />}
-                  {stock.change >= 0 ? '+' : ''}{Number(stock.change).toFixed(2)}%
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
+      {/* 모의투자 총 보유자산 요약 (주문 박스 내부 상단) */}
+      {balanceCard}
 
-        <div className="order-fds-tag" title="StockShield 실시간 시장가 체결">
-          <ShieldCheck size={13} /> 시장가 전용
-        </div>
-      </div>
-
-      {/* 계좌 잠금 또는 시세 지연 경고 배너 */}
+      {/* 계좌 잠금 경고 배너 */}
       {isAccountLocked && (
         <div style={{ background: '#3b161c', border: '1px solid #ff4d64', borderRadius: '6px', padding: '8px 10px', marginBottom: '10px', fontSize: '11.5px', color: '#ff8596', display: 'flex', alignItems: 'center', gap: '6px' }}>
           <Lock size={14} style={{ flexShrink: 0 }} />
           <span>계좌 잠금 상태 ({currentUser.acntStatCd}): {currentUser.lockReason || '관리자에게 문의하세요.'}</span>
-        </div>
-      )}
-      {!isAccountLocked && isPriceDelayed && (
-        <div style={{ background: '#332714', border: '1px solid #f1cc62', borderRadius: '6px', padding: '8px 10px', marginBottom: '10px', fontSize: '11.5px', color: '#f1cc62', display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Clock3 size={14} style={{ flexShrink: 0 }} />
-          <span>시세가 60초 이상 지연되어 주문 시 거절(PRICE_STALE)될 수 있습니다.</span>
         </div>
       )}
 
@@ -337,33 +322,60 @@ export default function TradingOrderPanel({
             </div>
           )}
 
-          {/* 주문 구분: 최신 명세에 맞춰 시장가 주문만 제공 */}
+          {/* 주문 구분: 시장가 / 지정가 */}
           <div className="order-mode-row">
             <span className="mode-label">주문 방식</span>
-            <div className="mode-selector">
+            <div className="mode-selector" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
               <button
                 type="button"
-                className="active"
-                style={{ width: '100%' }}
+                className={priceMode === 'MARKET' ? 'active' : ''}
+                onClick={() => {
+                  setPriceMode('MARKET');
+                  setErrorMsg('');
+                }}
               >
-                시장가 (서버 최신 시세 즉시 체결)
+                시장가
+              </button>
+              <button
+                type="button"
+                className={priceMode === 'LIMIT' ? 'active' : ''}
+                onClick={() => {
+                  setPriceMode('LIMIT');
+                  if (!limitPrice && marketPrice > 0) setLimitPrice(marketPrice);
+                  setErrorMsg('');
+                }}
+              >
+                지정가
               </button>
             </div>
           </div>
 
-          {/* 예상 체결 단가 (읽기 전용 표시) */}
+          {/* 주문 단가 (시장가: 읽기 전용, 지정가: 입력 가능) */}
           <div className="order-field-group">
             <div className="field-title-row">
-              <label>현재 기준 단가 (KRW)</label>
-              <span className="market-note">서버 Redis 실시간 시세 기준</span>
+              <label>{priceMode === 'LIMIT' ? '지정 단가 (KRW)' : '현재 기준 단가 (KRW)'}</label>
+              <span className="market-note">
+                {priceMode === 'LIMIT' ? '서버 미지원 (시장가만 체결)' : '서버 Redis 실시간 시세 기준'}
+              </span>
             </div>
             <div className="stepper-input-wrap">
-              <input
-                type="text"
-                value={effectivePrice > 0 ? `₩${won(effectivePrice)}` : '시세 조회 중'}
-                disabled
-                className="order-number-input"
-              />
+              {priceMode === 'LIMIT' ? (
+                <input
+                  type="number"
+                  min="1"
+                  step="100"
+                  value={limitPrice || ''}
+                  onChange={(e) => setLimitPrice(Math.max(0, Number(e.target.value) || 0))}
+                  className="order-number-input"
+                />
+              ) : (
+                <input
+                  type="text"
+                  value={marketPrice > 0 ? `₩${won(marketPrice)}` : '시세 조회 중'}
+                  disabled
+                  className="order-number-input"
+                />
+              )}
             </div>
           </div>
 
@@ -433,6 +445,14 @@ export default function TradingOrderPanel({
                   ))}
             </div>
           </div>
+
+          {/* 시세 지연 경고 배너 (장 운영 중에만 표시, 주문수량 % 아래) */}
+          {isMarketOpen && !isAccountLocked && isPriceDelayed && (
+            <div style={{ background: '#332714', border: '1px solid #f1cc62', borderRadius: '6px', padding: '8px 10px', marginBottom: '10px', fontSize: '11.5px', color: '#f1cc62', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Clock3 size={14} style={{ flexShrink: 0 }} />
+              <span>시세가 60초 이상 지연되어 주문 시 거절(PRICE_STALE)될 수 있습니다.</span>
+            </div>
+          )}
 
           {/* 금액 계산 요약 카드 */}
           <div className="order-calc-card">
