@@ -10,7 +10,7 @@ Spring Boot 3.3.5, Java 17, PostgreSQL 15.19, Redis 7.2.17, Flyway
 | 키 | 설명 |
 |---|---|
 | `DB_APP_PASSWORD` | 앱 DB 계정 비밀번호. 비워 두면 서버가 안 뜬다 |
-| `MAIL_*` | 인증 코드 메일용 Gmail 계정. 앱 비밀번호는 조성우에게 따로 받는다 |
+| `MAIL_*` | 인증 코드 메일용 Gmail 계정. 앱 비밀번호는 팀 내부에서 따로 받는다 |
 | `JWT_SECRET` | 토큰 서명 키. 32바이트 이상이어야 서버가 뜬다 |
 | `INTERNAL_TOKEN` | 정기 대사 결과 확인 API용 토큰. 비워 두면 그 API는 항상 401 |
 | `CORS_ALLOWED_ORIGINS` | 프론트 주소. 기본값 `http://localhost:5173` |
@@ -55,12 +55,6 @@ cd backend
 .\gradlew.bat bootRun
 ```
 
-메일 계정 없이 화면만 볼 때는 `fake-fds` 프로필로 띄운다. 로그인할 때 이메일 인증을 건너뛴다. 곧 지울 예정이다.
-
-```powershell
-.\gradlew.bat bootRun --args="--spring.profiles.active=fake-fds"
-```
-
 ## 테스트
 
 Docker Desktop을 켜고 실행한다. PostgreSQL, Redis 컨테이너는 테스트가 알아서 띄운다.
@@ -70,7 +64,13 @@ cd backend
 .\gradlew.bat test
 ```
 
-결과는 `build/reports/tests/test/index.html`에서 본다. FDS 공격 시나리오는 `.\gradlew.bat fdsScenarioTest`로 따로 돌린다.
+결과는 `build/reports/tests/test/index.html`에서 본다.
+
+FDS 공격 시나리오(`@Tag("fds-scenario")`)는 `test`에서 빠지고 따로 돌린다. 가짜 FDS 없이 실제 FDS로 돈다.
+
+```powershell
+.\gradlew.bat fdsScenarioTest
+```
 
 ## 구조
 
