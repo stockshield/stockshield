@@ -111,3 +111,44 @@ docker exec -it stockshield-kafka /opt/kafka/bin/kafka-console-producer.sh --boo
 | 비밀번호를 바꿨는데 DB 접속이 안 됨 | PostgreSQL 비밀번호는 처음 만들 때만 적용됩니다. `down -v`로 초기화한 뒤 다시 실행하세요 (데이터가 지워집니다) |
 | `docker exec` 실행 시 `C:/Program Files/Git/opt/...: no such file or directory` | Git Bash의 경로 자동 변환 때문입니다. 명령 앞에 `MSYS_NO_PATHCONV=1 `을 붙이거나 PowerShell에서 실행하세요 |
 | Kafka가 `unhealthy` | `logs -f kafka`로 오류를 확인하세요. 메모리가 부족하면 Docker Desktop 설정에서 메모리를 늘리세요 |
+
+## 배포 (EC2)
+
+배포는 `infra/docker-compose.prod.yml` 하나로 전체 서비스를 띄웁니다.
+
+| 항목 | 값 |
+|---|---|
+| 서버 | AWS EC2 m7i-flex.large (시드니 ap-southeast-2), Ubuntu 24.04, Docker + compose |
+| 주소 | `http://13.55.65.203` (탄력적 IP, 서버를 중지했다 켜도 같음) |
+| 바깥에 여는 포트 | nginx 80 하나. SSH 22는 허용한 IP에서만 |
+| docker 네트워크 | `172.28.0.0/16` 고정, nginx는 `172.28.0.10` 고정 (메인 서버가 믿는 프록시 주소) |
+
+nginx가 화면 빌드 파일을 내보내고 `/api`·`/ws`를 메인 서버로 넘깁니다. `/ws`에는 WebSocket 업그레이드 헤더(Upgrade, Connection)를, 모든 요청에는 nginx가 직접 본 사용자 주소를 `X-Forwarded-For`로 넘깁니다(화면이 보낸 값은 버림).
+
+### 서버의 .env
+
+서버의 `~/stockshield/infra/.env`에 둡니다(권한 600, Git에 올리지 않음). 이름은 `infra/.env.example`과 같고, 배포에서 다른 점은 아래와 같습니다.
+
+- `POSTGRES_PASSWORD`·`DB_APP_PASSWORD`·`REDIS_PASSWORD`·`JWT_SECRET`·`INTERNAL_TOKEN`: 예시값이 아닌 새 무작위 값
+- `CORS_ALLOWED_ORIGINS=http://13.55.65.203` (브라우저 주소창과 글자 그대로 같게)
+- `ADMIN_LGN_ID`·`ADMIN_EML_ADDR`·`ADMIN_PWD_HASH`: prod 프로필에서 비어 있으면 서버가 뜨지 않음. 해시는 작은따옴표로 감쌈(backend/README)
+- `MAIL_*`, `KIS_APP_KEY`·`KIS_APP_SECRET`, `GEMINI_API_KEY`, `FINLIGHT_API_KEY`: 각 담당자에게 받거나 발급
+- `COLLECTOR_MODE`: 기본 `KIS`. 같은 KIS 키로 노트북 수집기와 동시에 띄우지 않음
+- `SPRING_PROFILES_ACTIVE`: 기본 `prod`. 관리자 값 없이 시험할 때만 `default`로 두고, 시험 뒤 `down -v`로 DB를 비움(V4는 한 번만 실행되기 때문)
+- DB·Redis·Kafka·AI 서버 주소는 compose가 서비스 이름(postgres, redis, kafka:29092, ai-server:8000)으로 넣으므로 .env에 쓰지 않음
+
+### 실행 · 확인 · 종료 (서버에서)
+
+```bash
+cd ~/stockshield
+docker compose -f infra/docker-compose.prod.yml --env-file infra/.env up -d --build
+docker compose -f infra/docker-compose.prod.yml ps
+docker compose -f infra/docker-compose.prod.yml logs -f backend
+docker compose -f infra/docker-compose.prod.yml down        # 데이터(볼륨)는 남김
+```
+
+수집기 녹화 파일은 `collector-data` 볼륨에 남습니다. 꺼내려면 `docker compose -f infra/docker-compose.prod.yml cp collector:/app/data ./data`를 씁니다.
+
+### 비용
+
+크레딧(무료 플랜)에서 서버 시간당 약 $0.12가 빠집니다. 쓰지 않는 기간에는 EC2 콘솔에서 인스턴스를 **중지**합니다(설정·데이터·고정 IP 유지). 발표가 끝나면 인스턴스를 종료하고 탄력적 IP를 해제합니다.
