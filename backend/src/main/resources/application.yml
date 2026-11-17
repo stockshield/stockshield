@@ -108,8 +108,9 @@ stockshield:
     enabled: ${NEWS_ENABLED:true}
     finlight-url: https://api.finlight.me
     finlight-api-key: ${FINLIGHT_API_KEY:}
-    interval: 10m
-    initial-delay: 1m
+    # @Scheduled에 들어가므로 ISO-8601 형식(PT10M)으로 쓴다. "10m"은 기동 실패
+    interval: PT10M
+    initial-delay: PT1M
     page-size: 100
     # 배치 한 번에 AI 서버로 요약할 최대 기사 수 (Gemini 무료 등급 한도 보호)
     summarize-per-batch: 10
