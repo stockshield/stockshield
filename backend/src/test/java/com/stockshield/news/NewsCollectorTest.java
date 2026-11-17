@@ -37,8 +37,6 @@ import com.sun.net.httpserver.HttpServer;
 
 class NewsCollectorTest extends IntegrationTestSupport {
 
-    private static boolean newsUrlReady;
-
     @Autowired
     private JdbcTemplate jdbc;
 
@@ -49,19 +47,11 @@ class NewsCollectorTest extends IntegrationTestSupport {
     private final AiServerClient ai = mock(AiServerClient.class);
     private NewsCollector collector;
 
-    /**
-     * news_url은 조성우의 Flyway V5가 만든다. V5가 merge되기 전에는 테스트 DB에 여기서 임시로 만든다.
-     * V5가 들어오면 IF NOT EXISTS라 아무것도 하지 않는다(그 뒤 이 블록은 지워도 됨).
-     */
     @BeforeEach
     void setUp() throws Exception {
         // 앱 DB 계정에는 뉴스 삭제 권한이 없어(V2) 정리는 관리자 계정으로 한다
         try (Connection c = DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(),
                 POSTGRES.getPassword()); Statement st = c.createStatement()) {
-            if (!newsUrlReady) {
-                st.execute("ALTER TABLE news ADD COLUMN IF NOT EXISTS news_url VARCHAR(1000)");
-                newsUrlReady = true;
-            }
             st.execute("DELETE FROM news_stock");
             st.execute("DELETE FROM news");
         }
