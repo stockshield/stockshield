@@ -54,6 +54,21 @@ class AppDbPermissionTest extends IntegrationTestSupport {
     }
 
     @Test
+    @DisplayName("일봉 price_daily는 앱 계정으로 추가·덮어쓰기는 되고 삭제는 안 된다 (V6, 대기 목록 #3·#90)")
+    void priceDailyAllowsUpsertButNotDelete() {
+        String upsert = "INSERT INTO price_daily (tck_cd, bs_dt, open_prc, high_prc, low_prc, close_prc, trd_vol) "
+                + "VALUES ('005930', '19000101', 100, 110, 90, ?, 10) "
+                + "ON CONFLICT (tck_cd, bs_dt) DO UPDATE SET close_prc = EXCLUDED.close_prc";
+        jdbcTemplate.update(upsert, 105);
+        jdbcTemplate.update(upsert, 107);
+
+        Long closePrc = jdbcTemplate.queryForObject(
+                "SELECT close_prc FROM price_daily WHERE tck_cd = '005930' AND bs_dt = '19000101'", Long.class);
+        assertThat(closePrc).isEqualTo(107L);
+        assertRejected("DELETE FROM price_daily WHERE 1 = 0", SqlStates.INSUFFICIENT_PRIVILEGE);
+    }
+
+    @Test
     @DisplayName("앱 계정은 테이블 구조를 바꾸거나 지울 수 없다")
     void appAccountCannotChangeSchema() {
         assertRejected("ALTER TABLE account ADD COLUMN memo VARCHAR(10)", SqlStates.INSUFFICIENT_PRIVILEGE);
