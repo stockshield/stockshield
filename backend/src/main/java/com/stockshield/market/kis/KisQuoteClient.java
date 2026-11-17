@@ -75,6 +75,38 @@ public class KisQuoteClient {
         return out;
     }
 
+    static final String DAILY_PATH = "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice";
+    static final String DAILY_TR = "FHKST03010100";
+
+    /** 일봉 한 건 (수정주가) */
+    public record DailyBar(String bsDt, long openPrc, long highPrc, long lowPrc, long closePrc, long trdVol) {
+    }
+
+    /**
+     * 국내주식 기간별 시세(FHKST03010100) 일봉, 수정주가(FID_ORG_ADJ_PRC=0). 호출당 최대 100건이고 다음 페이지 표시가 없어
+     * 부르는 쪽이 날짜 구간을 나눠야 한다. 종가가 0인 행(거래 없음)은 뺀다. 결과는 KIS 순서(최신부터).
+     */
+    public java.util.List<DailyBar> daily(String tckCd, String fromYmd, String toYmd) {
+        JsonNode body = get(DAILY_PATH, DAILY_TR, Map.of("FID_COND_MRKT_DIV_CODE", "J", "FID_INPUT_ISCD", tckCd,
+                "FID_INPUT_DATE_1", fromYmd, "FID_INPUT_DATE_2", toYmd, "FID_PERIOD_DIV_CODE", "D",
+                "FID_ORG_ADJ_PRC", "0"));
+        java.util.List<DailyBar> out = new java.util.ArrayList<>();
+        for (JsonNode r : body.path("output2")) {
+            String dt = r.path("stck_bsop_date").asText("");
+            long close = r.path("stck_clpr").asLong(0);
+            if (dt.length() != 8 || close <= 0) {
+                continue;
+            }
+            long open = r.path("stck_oprc").asLong(0);
+            long high = r.path("stck_hgpr").asLong(0);
+            long low = r.path("stck_lwpr").asLong(0);
+            // 시가가 0이면(단일가만 체결 등) 종가로 채운다
+            out.add(new DailyBar(dt, open > 0 ? open : close, high > 0 ? high : close, low > 0 ? low : close, close,
+                    r.path("acml_vol").asLong(0)));
+        }
+        return out;
+    }
+
     private JsonNode get(String path, String trId, Map<String, String> params) {
         if (!hasKey()) {
             throw new KisUnavailableException("KIS 앱 키가 없음");

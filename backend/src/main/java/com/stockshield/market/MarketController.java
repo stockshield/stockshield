@@ -19,10 +19,12 @@ public class MarketController {
 
     private final MarketQueryService service;
     private final OrderbookService orderbook;
+    private final CandleService candles;
 
-    public MarketController(MarketQueryService service, OrderbookService orderbook) {
+    public MarketController(MarketQueryService service, OrderbookService orderbook, CandleService candles) {
         this.service = service;
         this.orderbook = orderbook;
+        this.candles = candles;
     }
 
     /** 종목 자동완성 검색 (10행) */
@@ -41,6 +43,13 @@ public class MarketController {
     @GetMapping("/stocks/{tckCd}")
     public Map<String, Object> detail(@PathVariable String tckCd) {
         return service.detail(tckCd);
+    }
+
+    /** 일·주·월봉 (차트·호가창 합의 4절). interval=D|W|M, 오래된 것부터 저장된 전체, 마지막은 진행 중인 봉 */
+    @GetMapping("/stocks/{tckCd}/candles")
+    public Map<String, Object> candles(@PathVariable String tckCd,
+                                       @RequestParam(name = "interval", required = false) String interval) {
+        return candles.candles(tckCd, interval);
     }
 
     /** 종목 호가 10단계 (차트·호가창 합의 5절). 화면이 3초마다 부른다. KIS 실패면 503 ORDERBOOK_UNAVAILABLE */
