@@ -13,7 +13,8 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
  * FDS의 커밋 후 작업(경보 전송, ③ 새 IP 거래 기록, AI 설명 요청)을 돌리는 실행기.
  * 모든 @Async에는 이 이름("fdsExecutor")을 적는다.
  *
- * - 큐가 가득 차면 작업을 거부하고 로그만 남긴다(AbortPolicy). CallerRunsPolicy는 쓰지 않는다:
+ * - 큐가 가득 차면 작업을 거부한다(AbortPolicy). 맡기는 쪽은 @Async 대신 직접 execute하고 TaskRejectedException을 잡아
+ *   경고 한 줄만 남긴다(긴 오류 내역이 요청 스레드에서 찍혀 주문이 느려지지 않게). CallerRunsPolicy는 쓰지 않는다:
  *   커밋 뒤 리스너를 부른 요청 스레드에서 작업이 돌아 주문·출금 응답이 늦어지기 때문이다(TRD_ORD_001 #6, SYS_CORE_001 #1).
  * - 요청 스레드의 MDC(거래추적번호 traceId)를 작업 스레드로 복사해, 커밋 뒤 작업이 실패해 로그만 남을 때도
  *   거래추적번호로 찾을 수 있게 한다(SYS_SEC_001 #6).
@@ -26,7 +27,8 @@ public class FdsExecutorConfig {
 
     static final int CORE_POOL_SIZE = 2;
     static final int MAX_POOL_SIZE = 4;
-    static final int QUEUE_CAPACITY = 200;
+    // 50명 연속 주문(초당 체결 약 100건) 부하에서 200칸이 차서 늘림. 스레드는 DB 연결 20개를 주문과 나눠 써서 4 그대로(11/17)
+    static final int QUEUE_CAPACITY = 1000;
 
     @Bean(name = FDS_EXECUTOR)
     public ThreadPoolTaskExecutor fdsExecutor() {

@@ -6,14 +6,17 @@ import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.Executor;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.scheduling.annotation.Async;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
@@ -23,6 +26,7 @@ import com.stockshield.fds.api.FilledOrderView;
 import com.stockshield.fds.api.LedgerReader;
 import com.stockshield.fds.api.OrderFilledEvent;
 import com.stockshield.fds.api.RequestMeta;
+import com.stockshield.common.trace.TraceIds;
 import com.stockshield.fds.config.FdsExecutorConfig;
 import com.stockshield.fds.detection.DetectionRecorder;
 import com.stockshield.fds.detection.DetectionRecorder.NewDetection;
@@ -40,7 +44,9 @@ import com.stockshield.fds.detection.DetectionRule;
  * - 그 IP에 가입(SIGNUP) 행이 있으면: 기록하지 않음
  * - 그 IP의 첫 인증 시각(같은 IP 행 중 가장 이른 reg_ts) ≤ 주문 시각 < 첫 인증 시각 + 24시간이면: NEW_IP_AFTER_AUTH
  * 결과는 LOGGED. 같은 주문번호의 기록이 이미 있으면 다시 저장하지 않는다.
- * 실패하면 로그만 남고 주문은 그대로다(FDS_TRD_001 #4). 실행기가 가득 차 거부된 작업도 로그만 남는다.
+ * 실패하면 로그만 남고 주문은 그대로다(FDS_TRD_001 #4).
+ * 실행기 대기열이 가득 차 거부되면 그 체결은 판단을 건너뛰고 주문번호·거래추적번호가 든 경고 한 줄만 남긴다.
+ * (@Async로 넘기면 거부 때 Spring이 요청 스레드에서 긴 오류 내역을 ERROR로 찍어 주문이 느려져서, 직접 실행기에 넘긴다)
  */
 @Component
 public class NewIpTradeRecorder {
@@ -65,28 +71,42 @@ public class NewIpTradeRecorder {
     private final TrustedAccessStore trustedAccess;
     private final DetectionRecorder recorder;
     private final JdbcTemplate jdbcTemplate;
+    private final Executor executor;
+    private final TransactionTemplate newTx;
 
     public NewIpTradeRecorder(LedgerReader ledgerReader, TrustedAccessStore trustedAccess,
-                              DetectionRecorder recorder, JdbcTemplate jdbcTemplate) {
+                              DetectionRecorder recorder, JdbcTemplate jdbcTemplate,
+                              @Qualifier(FdsExecutorConfig.FDS_EXECUTOR) Executor executor,
+                              PlatformTransactionManager txManager) {
         this.ledgerReader = ledgerReader;
         this.trustedAccess = trustedAccess;
         this.recorder = recorder;
         this.jdbcTemplate = jdbcTemplate;
+        this.executor = executor;
+        this.newTx = new TransactionTemplate(txManager);
+        this.newTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     /**
-     * 체결 주문 커밋 뒤 실행. Spring 6.1부터 이 리스너에는 REQUIRES_NEW·NOT_SUPPORTED 외의 @Transactional을 붙일 수 없다.
-     * 예외는 로그를 남기고 다시 던져 이 트랜잭션만 롤백한다(주문 쪽으로는 넘어가지 않는다).
+     * 체결 주문 커밋 뒤 요청 스레드에서 불린다. 판단은 fdsExecutor 스레드의 새 트랜잭션에서 하고 요청 스레드는 기다리지 않는다.
+     * 대기열이 가득 차 거부되면 판단을 건너뛰고 경고 한 줄만 남긴다(오류 내역 없음, 주문 응답에 영향 없음).
      */
-    @Async(FdsExecutorConfig.FDS_EXECUTOR)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void onOrderFilled(OrderFilledEvent event) {
         try {
-            record(event.ordNo());
+            executor.execute(() -> recordInNewTransaction(event.ordNo()));
+        } catch (TaskRejectedException e) {
+            log.warn("새 IP 거래 판단 건너뜀: fdsExecutor 대기열 가득 참 ordNo={} traceId={}",
+                    event.ordNo(), TraceIds.current());
+        }
+    }
+
+    /** 실행기 스레드에서 새 트랜잭션으로 판단·기록한다. 실패하면 이 트랜잭션만 롤백하고 로그를 남긴다 */
+    void recordInNewTransaction(String ordNo) {
+        try {
+            newTx.executeWithoutResult(s -> record(ordNo));
         } catch (RuntimeException e) {
-            log.warn("새 IP 거래 기록 실패, 주문은 그대로 둠 ordNo={}", event.ordNo(), e);
-            throw e;
+            log.warn("새 IP 거래 기록 실패, 주문은 그대로 둠 ordNo={}", ordNo, e);
         }
     }
 
