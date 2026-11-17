@@ -54,14 +54,37 @@ const MARKET_NEWS_STOCKS = [
   { code: '207940', name: '삼성바이오로직스' },
 ];
 
+const NEWS_DOMAIN_MAP = [
+  ['hankyung.com', '한국경제'],
+  ['mk.co.kr', '매일경제'],
+  ['sedaily.com', '서울경제'],
+  ['biz.chosun.com', '조선비즈'],
+  ['newspim.com', '뉴스핌'],
+  ['yna.co.kr', '연합뉴스'],
+  ['einfomax.co.kr', '연합인포맥스'],
+];
+
+function getMediaNameFromUrl(url) {
+  if (!url || url === '#') return '';
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    const match = NEWS_DOMAIN_MAP.find(([domain]) => host === domain || host.endsWith(`.${domain}`));
+    return match ? match[1] : host.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
 function adaptNewsItem(item, fallbackId, fallbackAuthor) {
+  const url = item.newsUrl || item.url || '#';
   return {
     id: item.newsId || item.id || fallbackId,
     title: item.newsTitl || item.title || '',
     summary: item.aiSmryCont || item.summary || '',
     sentiment: item.aiSntmScr,
     publishedAt: item.pubTs || item.publishedAt || '',
-    url: item.newsUrl || item.url || '#',
+    url,
+    mediaName: getMediaNameFromUrl(url),
     author: item.author || fallbackAuthor || '증권 뉴스',
   };
 }
@@ -197,7 +220,7 @@ export default function NewsPanel({ currentStock }) {
   const remainingCount = Math.max(0, displayedNews.length - initialCount);
 
   return (
-    <section className="news-panel panel" aria-label="실시간 증권 뉴스">
+    <section className="news-panel panel" aria-label="증권 뉴스">
       {/* 헤더 영역 */}
       <div className="news-panel-head">
         <div className="news-title-group">
@@ -206,10 +229,10 @@ export default function NewsPanel({ currentStock }) {
           </div>
           <div>
             <div className="news-title-row">
-              <h3>실시간 증권 뉴스</h3>
+              <h3>증권 뉴스</h3>
             </div>
             <p className="news-subtitle">
-              Finlight API를 통해 수집되는 실시간 주요 증시·종목 속보입니다.
+              Finlight API로 국내 경제 매체 기사를 10분마다 확인합니다(무료 플랜이라 최대 약 12시간 늦게 반영).
             </p>
           </div>
         </div>
@@ -217,7 +240,7 @@ export default function NewsPanel({ currentStock }) {
         {/* 자동 수집 상태 뱃지 */}
         <div className="news-head-actions">
           <span className="news-live-tag">
-            <span className="news-live-dot" /> {enabled ? '실시간 뉴스 연동 중' : '뉴스 API 미설정'}
+            <span className="news-live-dot" /> {enabled ? '뉴스 API 연동 중' : '뉴스 API 미설정'}
           </span>
           {lastUpdated && (
             <span className="news-last-time">
@@ -279,7 +302,7 @@ export default function NewsPanel({ currentStock }) {
 
                   <div className="news-item-foot">
                     <span className="news-author">
-                      {item.author || 'Finlight'}
+                      {item.mediaName || item.author || '국내 경제 매체'}
                     </span>
                     <span className="news-link-btn">
                       원문 기사 <ExternalLink size={12} />
@@ -318,7 +341,7 @@ export default function NewsPanel({ currentStock }) {
                 ? `'${searchQuery}' 검색 결과가 없습니다.`
                 : `'${currentStock?.name || '선택 종목'}' 관련 최근 뉴스가 없습니다.`}
             </h4>
-            <p>Finlight API를 통해 10분마다 새로운 종목 뉴스가 자동 수집 및 AI 요약됩니다.</p>
+            <p>Finlight API로 국내 경제 매체 기사를 10분마다 확인하며, 수집된 기사는 AI로 요약됩니다(무료 플랜 기준 최대 약 12시간 지연).</p>
           </div>
         )}
       </div>
@@ -329,7 +352,7 @@ export default function NewsPanel({ currentStock }) {
           ※ <b>AI 감성 점수</b>: AI가 기사 논조를 <b>-1.0(부정) ~ +1.0(긍정)</b>으로 산출한 지표이며, 매매 권유가 아닙니다.
         </span>
         <span>
-          출처: <b>Finlight 글로벌 금융 뉴스 피드</b> 실시간 수집 및 AI 요약 · 본 뉴스 정보는 <b>투자 참고용·교육 목적</b>으로만 제공됩니다.
+          출처: <b>Finlight API</b> 수집 국내 매체(한국경제·매일경제·서울경제·조선비즈·뉴스핌·연합뉴스 등) 한국어 기사 및 AI 요약 · 본 뉴스 정보는 <b>투자 참고용·교육 목적</b>으로만 제공됩니다.
         </span>
       </div>
     </section>
