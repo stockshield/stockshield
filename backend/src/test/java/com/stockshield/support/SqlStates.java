@@ -9,6 +9,10 @@ public final class SqlStates {
     public static final String INSUFFICIENT_PRIVILEGE = "42501";
     /** CHECK 제약 위반 */
     public static final String CHECK_VIOLATION = "23514";
+    /** UNIQUE·PK 위반 */
+    public static final String UNIQUE_VIOLATION = "23505";
+    /** 외래 키 위반 */
+    public static final String FOREIGN_KEY_VIOLATION = "23503";
 
     private SqlStates() {
     }
