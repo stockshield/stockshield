@@ -26,7 +26,10 @@ public class AiServerClient {
     public AiServerClient(@Value("${stockshield.ai.base-url:http://localhost:8000}") String baseUrl,
                           @Value("${stockshield.ai.timeout:10s}") Duration timeout,
                           @Value("${stockshield.ai.connect-timeout:2s}") Duration connectTimeout) {
-        HttpClient http = HttpClient.newBuilder().connectTimeout(connectTimeout).build();
+        // AI 서버(uvicorn)는 평문 HTTP/2 업그레이드(Upgrade: h2c)를 받지 않고 400을 돌려준다(11/17 배포에서 확인).
+        // JDK HttpClient 기본값은 HTTP/2라 본문이 있는 요청에 업그레이드 헤더를 붙이므로 HTTP/1.1로 고정한다
+        HttpClient http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(connectTimeout).build();
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(http);
         factory.setReadTimeout(timeout);
         this.restClient = RestClient.builder().baseUrl(baseUrl).requestFactory(factory).build();

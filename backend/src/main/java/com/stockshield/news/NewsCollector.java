@@ -80,7 +80,8 @@ public class NewsCollector {
     public record BatchResult(int fetched, int saved, int summarized) {
     }
 
-    @Scheduled(fixedDelayString = "${stockshield.news.interval:10m}", initialDelayString = "${stockshield.news.initial-delay:1m}")
+    // @Scheduled의 시간 문자열은 ISO-8601(PT10M)이나 밀리초 숫자만 받는다. "10m" 같은 줄임 표기는 기동 실패
+    @Scheduled(fixedDelayString = "${stockshield.news.interval:PT10M}", initialDelayString = "${stockshield.news.initial-delay:PT1M}")
     public void scheduled() {
         if (!enabled || !inActiveHours(LocalDateTime.now(clock))) {
             return;
