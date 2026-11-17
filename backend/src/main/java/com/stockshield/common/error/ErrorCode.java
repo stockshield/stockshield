@@ -36,7 +36,7 @@ public enum ErrorCode {
     // 410
     AUTH_CODE_EXPIRED(HttpStatus.GONE, "인증 코드가 만료되었습니다. 처음부터 다시 진행하세요."),
     // 422 - 업무 거절 (결과 저장)
-    MARKET_CLOSED(HttpStatus.UNPROCESSABLE_ENTITY, "장 운영 시간(휴장일 제외 평일 09:00~15:30)이 아닙니다."),
+    MARKET_CLOSED(HttpStatus.UNPROCESSABLE_ENTITY, "주문 가능 시간(휴장일 제외 평일 09:00~15:20)이 아닙니다."),
     PRICE_STALE(HttpStatus.UNPROCESSABLE_ENTITY, "시세가 지연되어 지금은 주문할 수 없습니다."),
     INSUFFICIENT_BALANCE(HttpStatus.UNPROCESSABLE_ENTITY, "예수금이 부족합니다."),
     INSUFFICIENT_HOLDING(HttpStatus.UNPROCESSABLE_ENTITY, "보유 수량이 부족합니다."),

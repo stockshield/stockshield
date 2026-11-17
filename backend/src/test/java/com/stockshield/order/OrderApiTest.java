@@ -154,13 +154,13 @@ class OrderApiTest extends LedgerTestSupport {
     }
 
     @Test
-    @DisplayName("장 운영 시간 경계: 15:29:59 체결, 15:30:00 거절, 08:59:59 거절, 09:00:00 체결, 토요일·휴장일 거절")
+    @DisplayName("주문 가능 시간 경계: 15:19:59 체결, 15:20:00·15:29:59(장 마감 동시호가) 거절, 08:59:59 거절, 09:00:00 체결, 토요일·휴장일 거절")
     void marketHoursBoundary() throws Exception {
-        Trader t = newTraderAt(LocalDateTime.of(2026, 11, 16, 15, 29, 59));
+        Trader t = newTraderAt(LocalDateTime.of(2026, 11, 16, 15, 19, 59));
         putPriceNow(SAMSUNG, 70_000);
         mockMvc.perform(orderRequest(t, orderBody(SAMSUNG, "BUY", 1, newKey()))).andExpect(status().isCreated());
 
-        t = moveTo(t, LocalDateTime.of(2026, 11, 16, 15, 30, 0));
+        t = moveTo(t, LocalDateTime.of(2026, 11, 16, 15, 20, 0));
         putPriceNow(SAMSUNG, 70_000);
         MvcResult closed = mockMvc.perform(orderRequest(t, orderBody(SAMSUNG, "BUY", 1, newKey())))
                 .andExpect(status().isUnprocessableEntity())
@@ -168,6 +168,12 @@ class OrderApiTest extends LedgerTestSupport {
                 .andReturn();
         assertThat(db.queryForObject("SELECT rjct_rsn_cd FROM orders WHERE ord_no = ?", String.class,
                 body(closed).path("detail").path("ordNo").asText())).isEqualTo("MARKET_CLOSED");
+
+        // 시세가 최신이어도 장 마감 동시호가 중이면 주문 가능 시간으로 거절
+        t = moveTo(t, LocalDateTime.of(2026, 11, 16, 15, 29, 59));
+        putPriceNow(SAMSUNG, 70_000);
+        mockMvc.perform(orderRequest(t, orderBody(SAMSUNG, "BUY", 1, newKey())))
+                .andExpect(jsonPath("$.code").value("MARKET_CLOSED"));
 
         t = moveTo(t, LocalDateTime.of(2026, 11, 17, 8, 59, 59));
         putPriceNow(SAMSUNG, 70_000);
@@ -189,7 +195,7 @@ class OrderApiTest extends LedgerTestSupport {
                 .andExpect(jsonPath("$.code").value("MARKET_CLOSED"));
 
         assertThat(tradeCount(t.acntNo())).isEqualTo(2);
-        assertThat(orderCount(t.acntNo())).isEqualTo(6);
+        assertThat(orderCount(t.acntNo())).isEqualTo(7);
     }
 
     @Test
