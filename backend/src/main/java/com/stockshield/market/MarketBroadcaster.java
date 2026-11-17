@@ -90,7 +90,8 @@ public class MarketBroadcaster {
     public void checkDelay() {
         riskJudge.sweep();
         LocalDateTime now = LocalDateTime.now(clock);
-        if (!marketHours.isOpen(now) || !marketHours.isOpen(now.minus(StockRiskJudge.STALE_AFTER))) {
+        // 주문 가능 시간(09:00~15:20)에만 판단. 동시호가(15:20~15:30)엔 체결이 없어 전 종목이 지연으로 보이므로 뺀다
+        if (!queryService.judgesDelay(now)) {
             delayed.clear();
             return;
         }

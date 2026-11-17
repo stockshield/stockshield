@@ -63,6 +63,9 @@ class MarketControllerTest extends IntegrationTestSupport {
         registry.add("spring.data.redis.port", () -> REDIS.getMappedPort(6379));
         registry.add("spring.data.redis.password", () -> "");
         registry.add("spring.kafka.listener.auto-startup", () -> "false");
+        // 시세 지연은 주문 가능 시간(평일 09:00~15:20)에만 판단하므로, 실제 시계로 도는 이 클래스는 시연 모드(항상 장중)로 둔다.
+        // 시간대별 경계는 judgesDelayOnlyWhileOrderable이 고정 시계로 본다
+        registry.add("stockshield.demo-mode", () -> "true");
     }
 
     @Autowired MockMvc mvc;
@@ -159,6 +162,40 @@ class MarketControllerTest extends IntegrationTestSupport {
     }
 
     @Test
+    @DisplayName("지연 판단 시간: 주문 가능 시간(09:00~15:20) 안이고 개장 60초 뒤만. 동시호가(15:20~15:30)·장 밖·주말은 지연으로 보지 않음")
+    void judgesDelayOnlyWhileOrderable() {
+        MarketQueryService q = new MarketQueryService(redis, jdbcTemplate, new com.fasterxml.jackson.databind.ObjectMapper(),
+                Clock.systemDefaultZone(), new MarketHours(false, ""));
+        LocalDateTime tue = LocalDateTime.of(2026, 11, 17, 0, 0);
+        assertThat(q.judgesDelay(tue.withHour(9).withMinute(0).withSecond(30))).isFalse();    // 개장 직후 60초
+        assertThat(q.judgesDelay(tue.withHour(9).withMinute(1).withSecond(1))).isTrue();
+        assertThat(q.judgesDelay(tue.withHour(15).withMinute(19).withSecond(59))).isTrue();
+        assertThat(q.judgesDelay(tue.withHour(15).withMinute(20))).isFalse();                 // 동시호가 시작
+        assertThat(q.judgesDelay(tue.withHour(15).withMinute(25))).isFalse();
+        assertThat(q.judgesDelay(tue.withHour(16).withMinute(0))).isFalse();                  // 장 마감 뒤
+        assertThat(q.judgesDelay(LocalDateTime.of(2026, 11, 15, 11, 0))).isFalse();           // 일요일
+    }
+
+    @Test
+    @DisplayName("동시호가(15:25)에는 시세가 몇 분 멈춰도 메인·상세 모두 priceDelayed=false이고 관제 지연 경고도 보내지 않는다")
+    void auctionIsNotDelay() {
+        Clock auction = Clock.fixed(LocalDateTime.of(2026, 11, 17, 15, 25).atZone(ZoneId.of("Asia/Seoul")).toInstant(),
+                ZoneId.of("Asia/Seoul"));
+        MarketQueryService q = new MarketQueryService(redis, jdbcTemplate, new com.fasterxml.jackson.databind.ObjectMapper(),
+                auction, new MarketHours(false, ""));
+        price("Q00001", 10_000, 1, 1000, "2026-11-17T15:19:58+09:00");
+        assertThat(q.summary().get("priceDelayed")).isEqualTo(false);
+        assertThat(q.detail("Q00001").get("priceDelayed")).isEqualTo(false);
+
+        SimpMessageSendingOperations ops = mock(SimpMessageSendingOperations.class);
+        StaticListableBeanFactory beans = new StaticListableBeanFactory();
+        beans.addBean("ops", ops);
+        new MarketBroadcaster(beans.getBeanProvider(SimpMessageSendingOperations.class), riskJudge, q,
+                new MarketHours(false, ""), auction).checkDelay();
+        verify(ops, never()).convertAndSend(eq(MarketBroadcaster.ADMIN_MARKET_TOPIC), any(Object.class));
+    }
+
+    @Test
     @DisplayName("관제 시세 지연 경고: 종목별로 지연 시작·해제 때만 보내고, 장 운영 시간 밖에서는 보내지 않는다")
     void adminMarketDelayPerStock() {
         SimpMessageSendingOperations ops = mock(SimpMessageSendingOperations.class);
@@ -193,7 +230,8 @@ class MarketControllerTest extends IntegrationTestSupport {
         Clock sunday = Clock.fixed(LocalDateTime.of(2026, 11, 15, 11, 0).atZone(ZoneId.of("Asia/Seoul")).toInstant(),
                 ZoneId.of("Asia/Seoul"));
         MarketBroadcaster closed = new MarketBroadcaster(closedBeans.getBeanProvider(SimpMessageSendingOperations.class),
-                riskJudge, queryService, new MarketHours(false, ""), sunday);
+                riskJudge, new MarketQueryService(redis, jdbcTemplate, new com.fasterxml.jackson.databind.ObjectMapper(),
+                sunday, new MarketHours(false, "")), new MarketHours(false, ""), sunday);
         price("Q00003", 30_000, 1, 1000, ago(600));
         closed.checkDelay();
         verify(closedOps, never()).convertAndSend(eq(MarketBroadcaster.ADMIN_MARKET_TOPIC), any(Object.class));
