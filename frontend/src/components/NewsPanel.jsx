@@ -11,7 +11,7 @@ import {
   ChevronUp 
 } from 'lucide-react';
 
-// 상대 시간 포맷팅 헬퍼 (예: "5분 전", "1시간 전", "15:45")
+import { API_BASE } from '../utils/storage';
 function formatTimeAgo(dateStr) {
   if (!dateStr) return '최신';
   try {
@@ -45,6 +45,7 @@ function getStockKeywords(stock) {
 
 export default function NewsPanel({ currentStock }) {
   const [news, setNews] = useState([]);
+  const [enabled, setEnabled] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState('');
@@ -62,19 +63,31 @@ export default function NewsPanel({ currentStock }) {
   const fetchNews = async () => {
     setLoading(true);
     try {
-      const res = await fetch('http://localhost:4000/api/news');
+      const res = await fetch(`${API_BASE}/news`);
       if (!res.ok) throw new Error(`HTTP error ${res.status}`);
       const data = await res.json();
-      if (data.news && Array.isArray(data.news)) {
-        setNews(data.news);
-        setLastUpdated(data.lastUpdated || new Date().toISOString());
-        setError('');
-      } else {
-        throw new Error('올바르지 않은 뉴스 데이터 형식');
-      }
+      const rawList = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.content)
+        ? data.content
+        : Array.isArray(data?.news)
+        ? data.news
+        : [];
+      const adapted = rawList.map((item, idx) => ({
+        id: item.newsId || item.id || idx,
+        title: item.newsTitl || item.title || '',
+        summary: item.aiSmryCont || item.summary || '',
+        sentiment: item.aiSntmScr,
+        publishedAt: item.pubTs || item.publishedAt || '',
+        url: item.url || '#',
+        author: item.author || '한국경제',
+      }));
+      setNews(adapted);
+      setEnabled(data?.enabled !== false);
+      setLastUpdated(data?.lastUpdated || adapted[0]?.publishedAt || '');
+      setError('');
     } catch (err) {
-      console.warn('뉴스 API 조회 실패, 이전 데이터 유지:', err.message);
-      setError('최신 뉴스를 실시간으로 갱신하는 중입니다.');
+      setError('뉴스 API가 아직 연결되지 않았거나 수집된 기사가 없습니다.');
     } finally {
       setLoading(false);
     }
@@ -134,7 +147,7 @@ export default function NewsPanel({ currentStock }) {
         {/* 10분 자동 수집 중 뱃지를 갱신 시간 왼쪽으로 배치 */}
         <div className="news-head-actions">
           <span className="news-live-tag">
-            <span className="news-live-dot" /> 10분 자동 수집 중
+            <span className="news-live-dot" /> {enabled ? '10분 자동 수집 중' : '로컬 모드: 뉴스 수집 꺼짐'}
           </span>
           {lastUpdated && (
             <span className="news-last-time">
