@@ -34,7 +34,7 @@ const RULE_NAME_MAP = {
   TRADE_NEW_IP: '신규 IP 주식 주문',
 };
 
-export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify }) {
+export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, onSessionExpired }) {
   const [activeSection, setActiveSection] = useState('DETECTIONS'); // 'DETECTIONS' | 'RECONCILE' | 'RISK_STOCKS' | 'ACCOUNT_LOCK'
 
   // 1) FDS 탐지 목록 상태
@@ -156,6 +156,15 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify }
         loadReconcileHistory(rcclPage);
       },
       onDisconnect: () => setWsConnected(false),
+      onAuthFailed: () => {
+        setWsConnected(false);
+        if (onNotify) {
+          onNotify('⚠️ 인증이 만료되어 실시간 관제 연결이 종료되었습니다. 다시 로그인해 주세요.');
+        }
+        if (onSessionExpired) {
+          onSessionExpired();
+        }
+      },
     });
 
     // 1. /topic/admin/detections: 신규 탐지 또는 AI 설명 상태 변경

@@ -3,7 +3,7 @@
 // - 프레임 포맷: COMMAND\nheader:value\n\nbody\0
 // - 자동 재연결(지수 백오프) 및 재연결 시 onReconnect 콜백 호출로 최신 REST 데이터 재조회 지원
 
-import { WS_BASE, getAuthTokens } from './storage';
+import { WS_BASE, getAuthTokens, refreshAccessToken } from './storage';
 
 const NULL_CHAR = '\x00';
 
@@ -80,6 +80,7 @@ export function createStompManager({
   onReconnect,
   onDisconnect,
   onError,
+  onAuthFailed,
 } = {}) {
   let ws = null;
   let connected = false;
@@ -88,6 +89,8 @@ export function createStompManager({
   let reconnectTimer = null;
   let reconnectAttempt = 0;
   let subSeq = 0;
+  let isRefreshingAuth = false;
+  let authRefreshAttempted = false;
 
   // Map<subId, { destination, callback }>
   const subscriptions = new Map();
@@ -172,6 +175,7 @@ export function createStompManager({
           connected = true;
           hasConnectedOnce = true;
           reconnectAttempt = 0;
+          authRefreshAttempted = false;
 
           // 등록된 모든 채널 다시 구독
           subscriptions.forEach((sub, subId) => {
@@ -204,8 +208,37 @@ export function createStompManager({
             });
           }
         } else if (frame.command === 'ERROR') {
+          const errMsg = frame.headers['message'] || frame.body || 'STOMP 오류';
           if (typeof onError === 'function') {
-            onError(frame.headers['message'] || frame.body || 'STOMP 오류');
+            onError(errMsg);
+          }
+          // 인증 만료/실패 오류인 경우에만 /auth/refresh로 Access Token 재발급 후 재연결 시도
+          const isAuthError = withAuth && /인증|토큰|만료|권한|auth|token|expired|unauthoriz/i.test(errMsg);
+          if (isAuthError && !isRefreshingAuth && !authRefreshAttempted) {
+            isRefreshingAuth = true;
+            authRefreshAttempted = true;
+            if (reconnectTimer) {
+              clearTimeout(reconnectTimer);
+              reconnectTimer = null;
+            }
+            try {
+              ws?.close();
+            } catch (e) {
+              // ignore
+            }
+            refreshAccessToken().then((refreshed) => {
+              isRefreshingAuth = false;
+              if (disposed) return;
+              if (refreshed) {
+                reconnectAttempt = 0;
+                connect();
+              } else {
+                disposed = true;
+                if (typeof onAuthFailed === 'function') {
+                  onAuthFailed(errMsg);
+                }
+              }
+            });
           }
         }
       });
@@ -222,7 +255,7 @@ export function createStompManager({
       if (wasConnected && typeof onDisconnect === 'function') {
         onDisconnect();
       }
-      if (!disposed) {
+      if (!disposed && !isRefreshingAuth) {
         scheduleReconnect();
       }
     };

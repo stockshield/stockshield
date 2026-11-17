@@ -11,7 +11,7 @@ import {
   ChevronUp 
 } from 'lucide-react';
 
-import { API_BASE } from '../utils/storage';
+import { API_BASE, fetchStockNews } from '../utils/storage';
 function formatTimeAgo(dateStr) {
   if (!dateStr) return '최신';
   try {
@@ -44,12 +44,11 @@ function getStockKeywords(stock) {
 }
 
 export default function NewsPanel({ currentStock }) {
-  const [news, setNews] = useState([]);
-  const [enabled, setEnabled] = useState(false);
+  const [stockNews, setStockNews] = useState([]);
+  const [enabled, setEnabled] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState('');
-  const [activeTab, setActiveTab] = useState('ALL'); // 'ALL' or 'STOCK'
   const [searchQuery, setSearchQuery] = useState('');
   const [isExpanded, setIsExpanded] = useState(false);
   const [isNarrowScreen, setIsNarrowScreen] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 1024);
@@ -60,65 +59,60 @@ export default function NewsPanel({ currentStock }) {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const fetchNews = async () => {
+  const loadStockNews = async (signal) => {
+    const tckCd = currentStock?.code;
+    if (!tckCd) {
+      setStockNews([]);
+      return;
+    }
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/news`);
-      if (!res.ok) throw new Error(`HTTP error ${res.status}`);
-      const data = await res.json();
-      const rawList = Array.isArray(data)
-        ? data
-        : Array.isArray(data?.content)
-        ? data.content
-        : Array.isArray(data?.news)
-        ? data.news
-        : [];
-      const adapted = rawList.map((item, idx) => ({
-        id: item.newsId || item.id || idx,
+      const res = await fetchStockNews(tckCd, signal);
+      if (!res.success) {
+        throw new Error(res.message || `HTTP ${res.status}`);
+      }
+      const adapted = res.items.map((item, idx) => ({
+        id: item.newsId || item.id || `${tckCd}-${idx}`,
         title: item.newsTitl || item.title || '',
         summary: item.aiSmryCont || item.summary || '',
         sentiment: item.aiSntmScr,
         publishedAt: item.pubTs || item.publishedAt || '',
-        url: item.url || '#',
-        author: item.author || '한국경제',
+        url: item.newsUrl || item.url || '#',
+        author: item.author || currentStock?.name || '뉴스',
       }));
-      setNews(adapted);
-      setEnabled(data?.enabled !== false);
-      setLastUpdated(data?.lastUpdated || adapted[0]?.publishedAt || '');
+      setStockNews(adapted);
+      setEnabled(true);
+      setLastUpdated(adapted[0]?.publishedAt || new Date().toISOString());
       setError('');
     } catch (err) {
-      setError('뉴스 API가 아직 연결되지 않았거나 수집된 기사가 없습니다.');
+      if (err.name !== 'AbortError') {
+        setError('종목 뉴스를 불러오지 못했습니다.');
+      }
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchNews();
-    // 1분(60초)마다 프론트엔드 최신 목록 자동 확인
-    const timer = setInterval(fetchNews, 60000);
-    return () => clearInterval(timer);
-  }, []);
+    const controller = new AbortController();
+    loadStockNews(controller.signal);
+    const timer = setInterval(() => loadStockNews(), 60000);
+    return () => {
+      controller.abort();
+      clearInterval(timer);
+    };
+  }, [currentStock?.code]);
 
-  const stockKeywords = useMemo(() => getStockKeywords(currentStock), [currentStock?.name]);
-
-  // 선택 종목 관련 기사 필터링
-  const stockRelatedNews = useMemo(() => {
-    if (!stockKeywords.length) return [];
-    return news.filter((item) =>
-      stockKeywords.some((kw) => item.title.toLowerCase().includes(kw.toLowerCase()))
-    );
-  }, [news, stockKeywords]);
-
-  // 검색어 및 탭 필터링 결과
+  // 검색어 필터링 결과
   const displayedNews = useMemo(() => {
-    let list = activeTab === 'STOCK' ? stockRelatedNews : news;
-    if (searchQuery.trim()) {
-      const q = searchQuery.trim().toLowerCase();
-      list = list.filter((item) => item.title.toLowerCase().includes(q) || (item.author && item.author.includes(q)));
-    }
-    return list;
-  }, [news, stockRelatedNews, activeTab, searchQuery]);
+    if (!searchQuery.trim()) return stockNews;
+    const q = searchQuery.trim().toLowerCase();
+    return stockNews.filter(
+      (item) =>
+        item.title.toLowerCase().includes(q) ||
+        (item.summary && item.summary.toLowerCase().includes(q))
+    );
+  }, [stockNews, searchQuery]);
 
   // 큰 화면: 한 줄에 3개씩 총 6개 (2줄)
   // 좁은 화면: 한 줄에 2개씩 총 4개 (2줄)
@@ -127,7 +121,7 @@ export default function NewsPanel({ currentStock }) {
   const remainingCount = Math.max(0, displayedNews.length - initialCount);
 
   return (
-    <section className="news-panel panel" aria-label="한국경제 실시간 증권 뉴스">
+    <section className="news-panel panel" aria-label="실시간 증권 뉴스">
       {/* 헤더 영역 */}
       <div className="news-panel-head">
         <div className="news-title-group">
@@ -136,18 +130,18 @@ export default function NewsPanel({ currentStock }) {
           </div>
           <div>
             <div className="news-title-row">
-              <h3>한국경제 실시간 증권 뉴스</h3>
+              <h3>실시간 증권 뉴스</h3>
             </div>
             <p className="news-subtitle">
-              한국경제 공식 RSS를 통해 10분마다 자동 수집되는 실시간 주요 증시·경제 속보입니다.
+              Finlight API를 통해 수집되는 실시간 주요 증시·종목 속보입니다.
             </p>
           </div>
         </div>
 
-        {/* 10분 자동 수집 중 뱃지를 갱신 시간 왼쪽으로 배치 */}
+        {/* 자동 수집 상태 뱃지 */}
         <div className="news-head-actions">
           <span className="news-live-tag">
-            <span className="news-live-dot" /> {enabled ? '10분 자동 수집 중' : '로컬 모드: 뉴스 수집 꺼짐'}
+            <span className="news-live-dot" /> {enabled ? '실시간 뉴스 연동 중' : '뉴스 API 미설정'}
           </span>
           {lastUpdated && (
             <span className="news-last-time">
@@ -157,7 +151,7 @@ export default function NewsPanel({ currentStock }) {
           <button
             type="button"
             className={`news-refresh-btn ${loading ? 'loading' : ''}`}
-            onClick={fetchNews}
+            onClick={() => loadStockNews()}
             title="뉴스 즉시 새로고침"
             aria-label="뉴스 즉시 새로고침"
           >
@@ -171,24 +165,10 @@ export default function NewsPanel({ currentStock }) {
         <div className="news-tabs">
           <button
             type="button"
-            className={`news-tab ${activeTab === 'ALL' ? 'active' : ''}`}
-            onClick={() => {
-              setActiveTab('ALL');
-              setIsExpanded(false);
-            }}
-          >
-            전체 증권 속보 <span className="tab-count">{news.length}</span>
-          </button>
-          <button
-            type="button"
-            className={`news-tab ${activeTab === 'STOCK' ? 'active' : ''}`}
-            onClick={() => {
-              setActiveTab('STOCK');
-              setIsExpanded(false);
-            }}
+            className="news-tab active"
           >
             <Sparkles size={12} />
-            {currentStock?.name || '종목'} 연관 뉴스 <span className="tab-count">{stockRelatedNews.length}</span>
+            {currentStock?.name || '종목'} 최신 뉴스 <span className="tab-count">{stockNews.length}</span>
           </button>
         </div>
 
@@ -222,44 +202,44 @@ export default function NewsPanel({ currentStock }) {
         {itemsToShow.length > 0 ? (
           <>
             <div className="news-grid">
-              {itemsToShow.map((item) => {
-                const isStockRelated = stockKeywords.some((kw) =>
-                  item.title.toLowerCase().includes(kw.toLowerCase())
-                );
-                return (
-                  <a
-                    key={item.id || item.url}
-                    href={item.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={`news-card-item ${isStockRelated ? 'highlight-stock' : ''}`}
-                    title={`${item.title} (새 탭에서 원문 보기)`}
-                  >
-                    <div className="news-item-top">
-                      <span className="news-source-tag">한국경제 · 증권</span>
-                      {isStockRelated && (
-                        <span className="news-related-badge">
-                          ★ {currentStock?.name} 관련
-                        </span>
-                      )}
-                      <span className="news-item-time">{formatTimeAgo(item.publishedAt)}</span>
-                    </div>
-
-                    <strong className="news-item-title">
-                      {item.title}
-                    </strong>
-
-                    <div className="news-item-foot">
-                      <span className="news-author">
-                        {item.author ? `${item.author} 기자` : '한국경제'}
+              {itemsToShow.map((item) => (
+                <a
+                  key={item.id || item.url}
+                  href={item.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="news-card-item highlight-stock"
+                  title={`${item.title} (새 탭에서 원문 보기)`}
+                >
+                  <div className="news-item-top">
+                    <span className="news-source-tag">{currentStock?.name || '종목'} 뉴스</span>
+                    {item.sentiment != null && (
+                      <span className="news-related-badge">
+                        감성 {Number(item.sentiment).toFixed(2)}
                       </span>
-                      <span className="news-link-btn">
-                        원문 기사 <ExternalLink size={12} />
-                      </span>
-                    </div>
-                  </a>
-                );
-              })}
+                    )}
+                    <span className="news-item-time">{formatTimeAgo(item.publishedAt)}</span>
+                  </div>
+
+                  <strong className="news-item-title">
+                    {item.title}
+                  </strong>
+                  {item.summary && (
+                    <p style={{ fontSize: '11.5px', color: '#8fa3bc', margin: '4px 0 6px', lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                      {item.summary}
+                    </p>
+                  )}
+
+                  <div className="news-item-foot">
+                    <span className="news-author">
+                      {item.author || 'Finlight'}
+                    </span>
+                    <span className="news-link-btn">
+                      원문 기사 <ExternalLink size={12} />
+                    </span>
+                  </div>
+                </a>
+              ))}
             </div>
 
             {/* 아래로 더보기 / 접기 버튼 */}
@@ -287,25 +267,11 @@ export default function NewsPanel({ currentStock }) {
           <div className="news-empty-state">
             <Rss size={28} />
             <h4>
-              {activeTab === 'STOCK'
-                ? `'${currentStock?.name}' 관련 최근 속보가 없습니다.`
-                : searchQuery
+              {searchQuery
                 ? `'${searchQuery}' 검색 결과가 없습니다.`
-                : '등록된 뉴스가 없습니다.'}
+                : `'${currentStock?.name || '선택 종목'}' 관련 최근 뉴스가 없습니다.`}
             </h4>
-            <p>한국경제 공식 RSS를 통해 10분마다 새로운 기사가 자동 수집 및 보관됩니다.</p>
-            {activeTab === 'STOCK' && (
-              <button
-                type="button"
-                className="news-view-all-btn"
-                onClick={() => {
-                  setActiveTab('ALL');
-                  setIsExpanded(false);
-                }}
-              >
-                전체 증권 뉴스 보기 ({news.length}건)
-              </button>
-            )}
+            <p>Finlight API를 통해 10분마다 새로운 종목 뉴스가 자동 수집 및 AI 요약됩니다.</p>
           </div>
         )}
       </div>

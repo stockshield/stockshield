@@ -143,8 +143,10 @@ function formatKRXDate(d, fmt = 'MM/DD') {
 function getIntervalBadgeLabel(interval) {
   if (interval === '1일') return '일봉';
   if (interval === '1주') return '주봉';
-  if (interval === '1개월') return '최근 1개월 (일봉)';
-  if (interval === '3개월') return '최근 3개월 (일봉)';
+  if (interval === '1개월') return '월봉';
+  if (interval === '3개월') return '3개월봉';
+  if (interval === '6개월') return '6개월봉';
+  if (interval === '1년') return '년봉';
   return `${interval} 봉`;
 }
 
@@ -314,51 +316,175 @@ function adaptChartBars(rawChart = []) {
 function aggregateMinuteBars(oneMinCandles = [], interval = '1분') {
   if (!Array.isArray(oneMinCandles) || oneMinCandles.length === 0) return [];
   let groupSize = 1;
-  if (interval === '5분') groupSize = 5;
+  if (interval === '3분') groupSize = 3;
+  else if (interval === '5분') groupSize = 5;
   else if (interval === '10분') groupSize = 10;
+  else if (interval === '15분') groupSize = 15;
   else if (interval === '30분') groupSize = 30;
   else if (interval === '1시간') groupSize = 60;
   else if (interval === '3시간') groupSize = 180;
-  else if (interval === '1일' || interval === '1주' || interval === '1개월' || interval === '3개월') {
+  else if (interval === '6시간') groupSize = 360;
+  else if (['1일', '1주', '1개월', '3개월', '6개월', '1년'].includes(interval)) {
     groupSize = oneMinCandles.length;
   }
 
   if (groupSize <= 1) return oneMinCandles;
 
+  // 09:00(540분) 기준으로 N분 단위 시간 구간 버킷에 묶음 (예: 5분봉 = 09:00~09:04, 09:05~09:09 ...)
+  const buckets = new Map();
+  for (const bar of oneMinCandles) {
+    const s = String(bar.bsMi || '');
+    if (s.length < 12) continue;
+    const ymd = s.slice(0, 8);
+    const totalMin = Number(s.slice(8, 10)) * 60 + Number(s.slice(10, 12));
+    const bucketIdx = Math.floor((totalMin - 540) / groupSize);
+    const key = `${ymd}:${bucketIdx}`;
+    if (!buckets.has(key)) {
+      const startMin = 540 + bucketIdx * groupSize;
+      const bHH = String(Math.floor(startMin / 60)).padStart(2, '0');
+      const bMI = String(startMin % 60).padStart(2, '0');
+      buckets.set(key, {
+        ymd,
+        bHH,
+        bMI,
+        bars: [],
+      });
+    }
+    buckets.get(key).bars.push(bar);
+  }
+
   const aggregated = [];
-  for (let i = 0; i < oneMinCandles.length; i += groupSize) {
-    const slice = oneMinCandles.slice(i, i + groupSize);
-    const first = slice[0];
-    const last = slice[slice.length - 1];
+  for (const bucket of buckets.values()) {
+    const { ymd, bHH, bMI, bars } = bucket;
+    const first = bars[0];
+    const last = bars[bars.length - 1];
     aggregated.push({
       bsMi: last.bsMi,
       open: first.open,
       close: last.close,
-      high: Math.max(...slice.map((c) => c.high)),
-      low: Math.min(...slice.map((c) => c.low)),
-      volume: slice.reduce((acc, c) => acc + (Number(c.volume) || 0), 0),
-      dateStr: last.dateStr,
-      label: last.label,
+      high: Math.max(...bars.map((c) => c.high)),
+      low: Math.min(...bars.map((c) => c.low)),
+      volume: bars.reduce((acc, c) => acc + (Number(c.volume) || 0), 0),
+      dateStr: `${ymd.slice(0, 4)}.${ymd.slice(4, 6)}.${ymd.slice(6, 8)} ${bHH}:${bMI}`,
+      label: `${bHH}:${bMI}`,
     });
   }
   return aggregated;
 }
 
+function aggregateMonthlyBars(monthlyCandles = [], monthsPerBar = 3) {
+  if (!Array.isArray(monthlyCandles) || monthlyCandles.length === 0) return [];
+  if (monthsPerBar <= 1) return monthlyCandles;
+
+  const result = [];
+  const n = monthlyCandles.length;
+  const remainder = n % monthsPerBar;
+  let idx = 0;
+
+  const mergeSlice = (slice) => {
+    const first = slice[0];
+    const last = slice[slice.length - 1];
+    const s1 = String(first.bsMi || '');
+    const s2 = String(last.bsMi || '');
+    const ym1 = s1.length >= 6 ? `${s1.slice(0, 4)}.${s1.slice(4, 6)}` : s1;
+    const ym2 = s2.length >= 6 ? `${s2.slice(0, 4)}.${s2.slice(4, 6)}` : s2;
+    return {
+      bsMi: last.bsMi,
+      open: Number(first.open ?? first.openPrc ?? 0),
+      close: Number(last.close ?? last.closePrc ?? 0),
+      high: Math.max(...slice.map((c) => Number(c.high ?? c.highPrc ?? 0))),
+      low: Math.min(...slice.map((c) => Number(c.low ?? c.lowPrc ?? 0))),
+      volume: slice.reduce((acc, c) => acc + (Number(c.volume ?? c.trdVol) || 0), 0),
+      dateStr: ym1 === ym2 ? `${ym2} (${monthsPerBar}개월봉)` : `${ym1} ~ ${ym2}`,
+      label: s2.length >= 6 ? `${s2.slice(2, 4)}.${s2.slice(4, 6)}` : last.label,
+    };
+  };
+
+  if (remainder > 0) {
+    result.push(mergeSlice(monthlyCandles.slice(0, remainder)));
+    idx = remainder;
+  }
+  while (idx < n) {
+    const end = Math.min(idx + monthsPerBar, n);
+    result.push(mergeSlice(monthlyCandles.slice(idx, end)));
+    idx = end;
+  }
+  return result;
+}
+
+const CHART_INTERVAL_GROUPS = [
+  { group: '분', items: ['1분', '3분', '5분', '10분', '15분', '30분'] },
+  { group: '시간', items: ['1시간', '3시간', '6시간'] },
+  { group: '기간', items: ['1일', '1주', '1개월', '3개월', '6개월', '1년'] },
+];
+const ALL_CHART_INTERVALS = CHART_INTERVAL_GROUPS.flatMap((g) => g.items);
+const FAVORITE_INTERVALS_KEY = 'stockshield_chart_favorite_intervals';
+const DEFAULT_FAVORITE_INTERVALS = ['1분', '15분', '1시간', '1일', '1주', '1개월'];
+
+function getDefaultZoomCount(interval) {
+  if (interval === '1일') return 125;   // 약 6개월 (KRX 영업일 기준)
+  if (interval === '1주') return 52;    // 약 1년 (52주)
+  if (['1개월', '3개월', '6개월', '1년'].includes(interval)) return 9999; // 전체
+  return 120; // 분/시간봉: 최근 약 120개
+}
+
 function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, setHover }) {
   const currentPrice = stock?.price || 70000;
+  const defaultZoom = getDefaultZoomCount(chartInterval);
 
-  // 1. 줌 & 팬 상태 관리 (기본 45개 표시, 드래그 및 마우스 휠로 조절)
-  const [zoomCount, setZoomCount] = useState(45);
+  // 1. 줌 & 팬 상태 관리 (주기별 기본 표시 범위, 드래그 및 마우스 휠로 조절)
+  const [zoomCount, setZoomCount] = useState(() => getDefaultZoomCount(chartInterval));
   const [panOffset, setPanOffset] = useState(0); // 0: 최신 데이터, >0: 과거 데이터
   const [isDragging, setIsDragging] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isIntervalMenuOpen, setIsIntervalMenuOpen] = useState(false);
+  const [favoriteIntervals, setFavoriteIntervals] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(FAVORITE_INTERVALS_KEY) || 'null');
+      if (Array.isArray(saved) && saved.length > 0) {
+        return saved.filter((iv) => ALL_CHART_INTERVALS.includes(iv));
+      }
+    } catch (e) {
+      // ignore
+    }
+    return DEFAULT_FAVORITE_INTERVALS;
+  });
 
   const chartWrapRef = useRef(null);
+  const intervalMenuRef = useRef(null);
   const dragStartRef = useRef({ x: 0, panOffset: 0, hasMoved: false });
 
-  // 주기(interval) 변경 시 기본 뷰(최신 시세, 45개)로 리셋
   useEffect(() => {
-    setZoomCount(45);
+    if (!isIntervalMenuOpen) return;
+    const handleOutside = (e) => {
+      if (intervalMenuRef.current && !intervalMenuRef.current.contains(e.target)) {
+        setIsIntervalMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [isIntervalMenuOpen]);
+
+  const toggleFavoriteInterval = (item, e) => {
+    e.stopPropagation();
+    setFavoriteIntervals((prev) => {
+      const exists = prev.includes(item);
+      const next = exists
+        ? prev.filter((x) => x !== item)
+        : ALL_CHART_INTERVALS.filter((x) => x === item || prev.includes(x));
+      const safeNext = next.length > 0 ? next : [item];
+      try {
+        localStorage.setItem(FAVORITE_INTERVALS_KEY, JSON.stringify(safeNext));
+      } catch (err) {
+        // ignore
+      }
+      return safeNext;
+    });
+  };
+
+  // 주기(interval) 변경 시 주기별 기본 뷰로 리셋
+  useEffect(() => {
+    setZoomCount(getDefaultZoomCount(chartInterval));
     setPanOffset(0);
     setHover(null);
   }, [chartInterval]);
@@ -388,7 +514,7 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
       const delta = e.deltaY < 0 ? -4 : 4;
       setZoomCount((prev) => {
         const minCount = 16;
-        const maxCount = Math.min(candles.length, 90);
+        const maxCount = Math.max(minCount, candles.length);
         return Math.max(minCount, Math.min(maxCount, prev + delta));
       });
     };
@@ -438,11 +564,12 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
   const xOffset = left;
   const lineY = y(currentPrice);
 
-  const isViewCustomized = clampedOffset > 0 || clampedZoom !== 45;
+  const expectedDefaultZoom = Math.max(minZoom, Math.min(totalCandles, defaultZoom));
+  const isViewCustomized = clampedOffset > 0 || (totalCandles > 0 && clampedZoom !== expectedDefaultZoom);
 
   const handleResetView = () => {
     setPanOffset(0);
-    setZoomCount(45);
+    setZoomCount(defaultZoom);
     setHover(null);
   };
 
@@ -529,7 +656,6 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
                 : '실제 투자 데이터가 아닌 디자인용 시세입니다.'}
             </div>
           </div>
-          <span className="current-interval-badge">{getIntervalBadgeLabel(chartInterval)}</span>
           <span
             className="chart-active-date-badge"
             style={{
@@ -580,7 +706,7 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
 
         <div className="intervals" role="tablist" aria-label="차트 주기 선택">
           <div className="interval-group">
-            {['1분', '5분', '10분', '30분'].map((item) => (
+            {favoriteIntervals.map((item) => (
               <button
                 key={item}
                 type="button"
@@ -590,32 +716,78 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
                 {item}
               </button>
             ))}
+            {!favoriteIntervals.includes(chartInterval) && (
+              <button
+                type="button"
+                className="selected"
+                onClick={() => { setHover(null); setChartInterval(chartInterval); }}
+              >
+                {chartInterval}
+              </button>
+            )}
           </div>
-          <span className="interval-divider" />
-          <div className="interval-group">
-            {['1시간', '3시간'].map((item) => (
-              <button
-                key={item}
-                type="button"
-                className={chartInterval === item ? 'selected' : ''}
-                onClick={() => { setHover(null); setChartInterval(item); }}
-              >
-                {item}
-              </button>
-            ))}
-          </div>
-          <span className="interval-divider" />
-          <div className="interval-group">
-            {['1일', '1주', '1개월', '3개월'].map((item) => (
-              <button
-                key={item}
-                type="button"
-                className={chartInterval === item ? 'selected' : ''}
-                onClick={() => { setHover(null); setChartInterval(item); }}
-              >
-                {item}
-              </button>
-            ))}
+
+          <div className="interval-dropdown-wrap" ref={intervalMenuRef}>
+            <button
+              type="button"
+              className={`interval-dropdown-trigger ${isIntervalMenuOpen ? 'open' : ''}`}
+              onClick={() => setIsIntervalMenuOpen((prev) => !prev)}
+              aria-expanded={isIntervalMenuOpen}
+              title="전체 시간대 봉 선택 및 즐겨찾기 관리"
+            >
+              <span>전체 주기</span>
+              <ChevronDown size={13} />
+            </button>
+
+            {isIntervalMenuOpen && (
+              <div className="interval-dropdown-menu panel">
+                <div className="interval-dropdown-hint">
+                  <Star size={11} fill="#f1cc62" color="#f1cc62" /> 별표로 차트 상단 즐겨찾기 추가/해제
+                </div>
+                {CHART_INTERVAL_GROUPS.map((grp) => (
+                  <div className="interval-dropdown-section" key={grp.group}>
+                    <div className="interval-dropdown-group-label">{grp.group}</div>
+                    <div className="interval-dropdown-grid">
+                      {grp.items.map((item) => {
+                        const isFav = favoriteIntervals.includes(item);
+                        const isActive = chartInterval === item;
+                        return (
+                          <div
+                            key={item}
+                            role="button"
+                            tabIndex={0}
+                            className={`interval-dropdown-item ${isActive ? 'active' : ''}`}
+                            onClick={() => {
+                              setHover(null);
+                              setChartInterval(item);
+                              setIsIntervalMenuOpen(false);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                setHover(null);
+                                setChartInterval(item);
+                                setIsIntervalMenuOpen(false);
+                              }
+                            }}
+                          >
+                            <span>{item}</span>
+                            <button
+                              type="button"
+                              className={`interval-fav-btn ${isFav ? 'starred' : ''}`}
+                              onClick={(e) => toggleFavoriteInterval(item, e)}
+                              aria-label={isFav ? `${item} 즐겨찾기 해제` : `${item} 즐겨찾기 추가`}
+                              title={isFav ? '즐겨찾기 해제' : '즐겨찾기 추가'}
+                            >
+                              <Star size={12} fill={isFav ? '#f1cc62' : 'none'} />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -866,22 +1038,34 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
   );
 }
 
-function OrderBook({ stock, orderbook, onSelectPrice }) {
+function OrderBook({ stock, orderbook, orderbookUnavailable = false, onSelectPrice }) {
   const basePrice = Number(stock.price || 0);
   const changeVal = Number(stock.change || 0);
-  const asks = Array.isArray(orderbook?.asks) ? orderbook.asks : [];
-  const bids = Array.isArray(orderbook?.bids) ? orderbook.bids : [];
+  // 백엔드 asks·bids는 모두 1단계(현재가에 가까운 쪽)부터 오므로 매도(asks)는 뒤집어서 5단계->1단계 순으로 위에 표시
+  const rawAsks = Array.isArray(orderbook?.asks) ? orderbook.asks.slice(0, 5) : [];
+  const asks = [...rawAsks].reverse().map((item) => ({
+    price: Number(item.prc ?? item.price ?? 0),
+    volume: Number(item.rsqn ?? item.volume ?? 0),
+  }));
+  const bids = (Array.isArray(orderbook?.bids) ? orderbook.bids.slice(0, 5) : []).map((item) => ({
+    price: Number(item.prc ?? item.price ?? 0),
+    volume: Number(item.rsqn ?? item.volume ?? 0),
+  }));
   const maxBookVol = Math.max(
     1,
-    ...asks.map((x) => Number(x.volume) || 0),
-    ...bids.map((x) => Number(x.volume) || 0)
+    ...asks.map((x) => x.volume),
+    ...bids.map((x) => x.volume)
   );
-  const totalAskVol = orderbook?.totalAskVol != null
+  const totalAskVol = orderbook?.totAskRsqn != null
+    ? Number(orderbook.totAskRsqn)
+    : orderbook?.totalAskVol != null
     ? Number(orderbook.totalAskVol)
-    : asks.reduce((s, x) => s + (Number(x.volume) || 0), 0);
-  const totalBidVol = orderbook?.totalBidVol != null
+    : asks.reduce((s, x) => s + x.volume, 0);
+  const totalBidVol = orderbook?.totBidRsqn != null
+    ? Number(orderbook.totBidRsqn)
+    : orderbook?.totalBidVol != null
     ? Number(orderbook.totalBidVol)
-    : bids.reduce((s, x) => s + (Number(x.volume) || 0), 0);
+    : bids.reduce((s, x) => s + x.volume, 0);
 
   return (
     <section className="orderbook panel">
@@ -894,7 +1078,11 @@ function OrderBook({ stock, orderbook, onSelectPrice }) {
           onClick={() => onSelectPrice && onSelectPrice(basePrice, 'BUY')}
           title="클릭하여 모의 주문창 열기"
         >
-          {orderbook?.source === 'KIS' ? 'KIS 실시간 호가' : '호가 클릭 주문'}
+          {orderbookUnavailable
+            ? '호가 일시 중단'
+            : orderbook?.mktOpenYn === 'N'
+            ? '장 마감 호가'
+            : 'KIS 실시간 호가'}
         </span>
       </div>
       <div className="book-columns">
@@ -903,7 +1091,11 @@ function OrderBook({ stock, orderbook, onSelectPrice }) {
         <span>매수잔량</span>
       </div>
       <div className="book-rows">
-        {asks.length > 0 ? asks.map((item, i) => (
+        {orderbookUnavailable ? (
+          <div style={{ gridRow: 'span 5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', color: '#f1cc62' }}>
+            호가 일시 중단 (503)
+          </div>
+        ) : asks.length > 0 ? asks.map((item, i) => (
           <div
             className="book-row ask"
             key={`ask-${i}`}
@@ -911,7 +1103,7 @@ function OrderBook({ stock, orderbook, onSelectPrice }) {
             title={`클릭하여 ₩${won(item.price)} 매수 주문`}
             onClick={() => onSelectPrice && onSelectPrice(item.price, 'BUY')}
           >
-            <div className="depth askdepth" style={{ width: `${Math.min(92, (Number(item.volume || 0) / maxBookVol) * 92)}%` }} />
+            <div className="depth askdepth" style={{ width: `${Math.min(92, (item.volume / maxBookVol) * 92)}%` }} />
             <span className="book-volume">{won(item.volume)}</span>
             <b>{won(item.price)}</b>
             <span>—</span>
@@ -933,7 +1125,11 @@ function OrderBook({ stock, orderbook, onSelectPrice }) {
             {changeVal >= 0 ? '+' : ''}{changeVal.toFixed(2)}%
           </span>
         </div>
-        {bids.length > 0 ? bids.map((item, i) => (
+        {orderbookUnavailable ? (
+          <div style={{ gridRow: 'span 5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', color: '#f1cc62' }}>
+            잠시 후 자동으로 다시 조회합니다
+          </div>
+        ) : bids.length > 0 ? bids.map((item, i) => (
           <div
             className="book-row bid"
             key={`bid-${i}`}
@@ -941,7 +1137,7 @@ function OrderBook({ stock, orderbook, onSelectPrice }) {
             title={`클릭하여 ₩${won(item.price)} 매도 주문`}
             onClick={() => onSelectPrice && onSelectPrice(item.price, 'SELL')}
           >
-            <div className="depth biddepth" style={{ width: `${Math.min(92, (Number(item.volume || 0) / maxBookVol) * 92)}%` }} />
+            <div className="depth biddepth" style={{ width: `${Math.min(92, (item.volume / maxBookVol) * 92)}%` }} />
             <span>—</span>
             <b>{won(item.price)}</b>
             <span className="book-volume">{won(item.volume)}</span>
@@ -1045,9 +1241,12 @@ function App() {
   const [realCandles, setRealCandles] = useState([]);
   const [periodCandles, setPeriodCandles] = useState([]);
   const [orderbook, setOrderbook] = useState(null);
+  const [orderbookUnavailable, setOrderbookUnavailable] = useState(false);
   const stompRef = useRef(null);
   const priceSubCleanupRef = useRef(null);
   const selectedCodeRef = useRef('005930');
+  const chartIntervalRef = useRef(chartInterval);
+  chartIntervalRef.current = chartInterval;
 
   const currentStock = stocks[stockIndex] || stocks[0] || DEFAULT_STOCKS[0];
   const selectedCode = currentStock.code;
@@ -1186,11 +1385,16 @@ function App() {
     let active = true;
     const controller = new AbortController();
     setOrderbook(null);
+    setOrderbookUnavailable(false);
 
     const loadOrderbook = async () => {
       const res = await fetchStockOrderbook(selectedCode, controller.signal);
-      if (active && res.success && res.data) {
+      if (!active) return;
+      if (res.success && res.data) {
         setOrderbook(res.data);
+        setOrderbookUnavailable(false);
+      } else if (res.unavailable || res.status === 503) {
+        setOrderbookUnavailable(true);
       }
     };
     loadOrderbook();
@@ -1203,26 +1407,56 @@ function App() {
     };
   }, [selectedCode]);
 
-  // 1일봉·1주일봉·1개월봉·3개월봉 선택 시 KIS REST API 기간별 캔들 조회
+  // 1일·1주·1개월·3개월·6개월·1년봉 선택 시 KIS REST API 기간별 캔들 조회
   useEffect(() => {
-    if (!['1일', '1주', '1개월', '3개월'].includes(chartInterval)) {
+    if (!['1일', '1주', '1개월', '3개월', '6개월', '1년'].includes(chartInterval)) {
       return;
     }
+    const apiInterval = ['3개월', '6개월', '1년'].includes(chartInterval) ? '1개월' : chartInterval;
     const controller = new AbortController();
-    fetchStockPeriodCandles(selectedCode, chartInterval, controller.signal).then((res) => {
+    fetchStockPeriodCandles(selectedCode, apiInterval, controller.signal).then((res) => {
       if (res.success && Array.isArray(res.candles)) {
-        setPeriodCandles(
-          res.candles.map((bar) => ({
-            bsMi: bar.bsMi,
+        const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+        const adapted = res.candles.map((bar) => {
+          const dt = String(bar.bsDt || bar.bsMi || '');
+          let dateStr = bar.dateStr || dt;
+          let label = bar.label || dt;
+          if (dt.length >= 8) {
+            const y = dt.slice(0, 4);
+            const m = dt.slice(4, 6);
+            const d = dt.slice(6, 8);
+            const dayName = dayNames[new Date(Number(y), Number(m) - 1, Number(d)).getDay()];
+            if (chartInterval === '1주') {
+              dateStr = bar.dateStr || `${y}.${m}.${d} (주봉)`;
+              label = bar.label || `${y.slice(-2)}.${m}.${d}`;
+            } else if (['1개월', '3개월', '6개월', '1년'].includes(chartInterval)) {
+              dateStr = bar.dateStr || `${y}년 ${m}월 (월봉)`;
+              label = bar.label || `${y.slice(-2)}.${m}`;
+            } else {
+              dateStr = bar.dateStr || `${y}.${m}.${d} (${dayName})`;
+              label = bar.label || `${m}/${d}`;
+            }
+          }
+          return {
+            bsMi: dt,
             open: Number(bar.openPrc ?? bar.open ?? 0),
             high: Number(bar.highPrc ?? bar.high ?? 0),
             low: Number(bar.lowPrc ?? bar.low ?? 0),
             close: Number(bar.closePrc ?? bar.close ?? 0),
             volume: Number(bar.trdVol ?? bar.volume ?? 0),
-            dateStr: bar.dateStr || bar.bsMi,
-            label: bar.label || bar.bsMi,
-          }))
-        );
+            dateStr,
+            label,
+          };
+        });
+        if (chartInterval === '3개월') {
+          setPeriodCandles(aggregateMonthlyBars(adapted, 3));
+        } else if (chartInterval === '6개월') {
+          setPeriodCandles(aggregateMonthlyBars(adapted, 6));
+        } else if (chartInterval === '1년') {
+          setPeriodCandles(aggregateMonthlyBars(adapted, 12));
+        } else {
+          setPeriodCandles(adapted);
+        }
       }
     });
     return () => controller.abort();
@@ -1314,30 +1548,12 @@ function App() {
       setLastQuoteTime(Date.now());
       setQuoteError('');
 
-      // 현재 보고 있는 종목의 최신 1분봉 및 기간봉 종가·고가·저가 실시간 갱신
+      // 현재 보고 있는 종목의 최신 1분봉 및 일·주·월봉 실시간 갱신 (같은 구간이면 종가·고가·저가 갱신, 다음 구간이면 새 봉 생성)
       if (tickPrice > 0) {
-        setRealCandles((prev) => {
-          if (!prev || prev.length === 0) return prev;
-          const last = prev[prev.length - 1];
-          const updatedLast = {
-            ...last,
-            close: tickPrice,
-            high: Math.max(last.high, tickPrice),
-            low: Math.min(last.low, tickPrice),
-          };
-          return [...prev.slice(0, -1), updatedLast];
-        });
-        setPeriodCandles((prev) => {
-          if (!prev || prev.length === 0) return prev;
-          const last = prev[prev.length - 1];
-          const updatedLast = {
-            ...last,
-            close: tickPrice,
-            high: Math.max(last.high, tickPrice),
-            low: Math.min(last.low, tickPrice),
-          };
-          return [...prev.slice(0, -1), updatedLast];
-        });
+        setRealCandles((prev) => applyTickToMinuteCandles(prev, tickPrice, tick.prcTs));
+        setPeriodCandles((prev) =>
+          applyTickToPeriodCandles(prev, tickPrice, tickVol, tick.prcTs, chartIntervalRef.current)
+        );
       }
     });
 
@@ -1356,9 +1572,9 @@ function App() {
   };
   const currentPrice = stock?.price || 0;
 
-  // 1일·1주·1개월·3개월봉은 KIS 기간별 시세 API 캔들 사용, 분봉·시간봉은 서버 수집 1분봉을 집계하여 표시
+  // 일·주·월·분기·반기·년봉은 KIS 기간별 시세 API 캔들 사용, 분봉·시간봉은 서버 수집 1분봉을 집계하여 표시
   const candles = useMemo(() => {
-    if (['1일', '1주', '1개월', '3개월'].includes(chartInterval)) {
+    if (['1일', '1주', '1개월', '3개월', '6개월', '1년'].includes(chartInterval)) {
       return periodCandles;
     }
     return aggregateMinuteBars(realCandles, chartInterval);
@@ -2033,6 +2249,11 @@ function App() {
             currentUser={currentUser}
             onNotify={alert}
             lastQuoteTime={lastQuoteTime}
+            onSessionExpired={() => {
+              setCurrentUser(null);
+              setActiveView('trading');
+              alert('세션이 만료되었습니다. 다시 로그인해 주세요.');
+            }}
           />
         ) : (
           <main className="layout" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '620px', padding: '40px 20px' }}>
@@ -2465,7 +2686,12 @@ function App() {
 
               {/* 호가창 & 반응형 분할 주문창 영역 (창 축소 시 호가창 우측에 주문창 표시) */}
               <div className="orderbook-column orderbook-order-split" ref={splitOrderRef}>
-                <OrderBook stock={stock} orderbook={orderbook} onSelectPrice={handleOpenOrder} />
+                <OrderBook
+                  stock={stock}
+                  orderbook={orderbook}
+                  orderbookUnavailable={orderbookUnavailable}
+                  onSelectPrice={handleOpenOrder}
+                />
 
                 <div className="split-trade-panel">
                   {currentUser ? (
