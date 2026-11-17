@@ -100,6 +100,8 @@ public class OrderbookService {
             return lastOrUnavailable(tckCd, "같은 종목 호가를 다른 요청이 가져오는 중");
         }
         try {
+            // 완료 기준 확인용: 같은 종목을 여러 명이 봐도 이 줄은 캐시 주기(장중 2초)당 한 번만 찍혀야 한다
+            log.info("KIS 호가 조회 tckCd={} cacheTtl={}s", tckCd, ttl.toSeconds());
             Map<String, Object> book = toResponse(tckCd, kis.orderbook(tckCd), now, open);
             String body = json.writeValueAsString(book);
             redis.opsForValue().set(CACHE_KEY + tckCd, body, ttl.toMillis(), TimeUnit.MILLISECONDS);
