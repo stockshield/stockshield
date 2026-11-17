@@ -2,19 +2,42 @@
 
 GET {BASE_URL}/api/v1/internal/reconcile/status?rcclDt=YYYYMMDD 를 X-Internal-Token 헤더로 부르고 판정한다.
 - 성공(0): runStatCd가 DONE이고 diffAcntCnt가 0
-- 실패(1): 불일치 계좌가 있음, FAILED, 아직 RUNNING, 그날 정기 대사 기록 없음, 응답 오류
+- 건너뜀(0): 서버에 연결하지 못함(EC2가 꺼져 있음 — 평일 16:30 자동 종료 뒤·발표 전 중지 기간·예약이 늦어진 날).
+  요약에 '서버 꺼짐, 확인 못 함'만 남기고 실패 메일을 보내지 않는다
+- 실패(1): 서버가 답했는데 불일치 계좌가 있음, FAILED, 아직 RUNNING, 그날 정기 대사 기록 없음, 401·400·5xx
 결과 표는 GITHUB_STEP_SUMMARY(있으면)에 쓴다. 토큰 값은 어디에도 출력하지 않는다.
 
-환경 변수: BASE_URL, INTERNAL_TOKEN, RCCL_DT(비우면 오늘, KST)
+환경 변수
+- BASE_URL, INTERNAL_TOKEN
+- RCCL_DT: 확인할 날짜(YYYYMMDD). 있으면 이 날짜를 본다(수동 실행)
+- RCCL_TARGET: RCCL_DT가 없을 때 today(오늘, 16:20 실행) 또는 prev-weekday(직전 평일, 아침 08:50 실행).
+  서버 정기 대사는 휴장일과 상관없이 평일마다 돌므로 직전 평일이면 된다(월요일 아침이면 금요일)
 """
 import json
 import os
+import socket
 import sys
 import urllib.error
 import urllib.request
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 KST = timezone(timedelta(hours=9))
+
+
+def prev_weekday(d: date) -> date:
+    d -= timedelta(days=1)
+    while d.weekday() >= 5:      # 토(5)·일(6)이면 금요일까지 거슬러 감
+        d -= timedelta(days=1)
+    return d
+
+
+def target_date(today: date) -> str:
+    explicit = os.environ.get("RCCL_DT", "").strip()
+    if explicit:
+        return explicit
+    if os.environ.get("RCCL_TARGET", "today").strip() == "prev-weekday":
+        return prev_weekday(today).strftime("%Y%m%d")
+    return today.strftime("%Y%m%d")
 
 
 def summary(lines):
@@ -29,25 +52,32 @@ def summary(lines):
 def main():
     base = os.environ.get("BASE_URL", "").rstrip("/")
     token = os.environ.get("INTERNAL_TOKEN", "")
-    date = os.environ.get("RCCL_DT", "").strip() or datetime.now(KST).strftime("%Y%m%d")
+    date_str = target_date(datetime.now(KST).date())
+    head = ["### 정기 대사 확인", ""]
     if not base or not token:
-        summary(["### 정기 대사 확인", "", "BASE_URL 또는 INTERNAL_TOKEN이 비어 있어 확인하지 못했습니다."])
+        summary(head + ["BASE_URL 또는 INTERNAL_TOKEN이 비어 있어 확인하지 못했습니다."])
         return 1
-    if len(date) != 8 or not date.isdigit():
-        summary(["### 정기 대사 확인", "", f"날짜 형식이 YYYYMMDD가 아닙니다: {date}"])
+    if len(date_str) != 8 or not date_str.isdigit():
+        summary(head + [f"날짜 형식이 YYYYMMDD가 아닙니다: {date_str}"])
         return 1
 
-    url = f"{base}/api/v1/internal/reconcile/status?rcclDt={date}"
+    url = f"{base}/api/v1/internal/reconcile/status?rcclDt={date_str}"
     req = urllib.request.Request(url, headers={"X-Internal-Token": token, "Accept": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=20) as res:
             body = json.loads(res.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
+        # 서버가 답했다: 토큰·날짜·서버 오류는 실패
         reason = {401: "토큰이 맞지 않습니다(INTERNAL_TOKEN 확인)", 400: "날짜 형식 오류"}.get(e.code, "서버 오류")
-        summary(["### 정기 대사 확인", "", f"HTTP {e.code}: {reason} · 대상일 {date}"])
+        summary(head + [f"❌ HTTP {e.code}: {reason} · 대상일 {date_str}"])
         return 1
-    except (urllib.error.URLError, TimeoutError, ValueError) as e:
-        summary(["### 정기 대사 확인", "", f"서버에 연결하지 못했습니다: {type(e).__name__} · {base}"])
+    except (urllib.error.URLError, TimeoutError, socket.timeout, ConnectionError) as e:
+        # 서버에 닿지 못했다: EC2가 꺼져 있는 시간. 실패로 치지 않는다
+        summary(head + [f"⏭️ 서버 꺼짐, 확인 못 함 · 대상일 {date_str} · {type(e).__name__}",
+                        "", "평일 아침 08:50 실행이 직전 평일 대사를 다시 확인합니다."])
+        return 0
+    except ValueError:
+        summary(head + [f"❌ 서버 응답을 해석하지 못했습니다 · 대상일 {date_str}"])
         return 1
 
     stat = body.get("runStatCd")
@@ -66,12 +96,10 @@ def main():
     else:
         verdict, ok = f"알 수 없는 상태 {stat}", False
 
-    summary([
-        "### 정기 대사 확인",
-        "",
+    summary(head + [
         "| 대상일 | 실행 번호 | 상태 | 전체 계좌 | 불일치 계좌 | 판정 |",
         "|---|---|---|---|---|---|",
-        f"| {date} | {body.get('rcclRunNo')} | {stat} | {tot} | {diff} | {'✅' if ok else '❌'} {verdict} |",
+        f"| {date_str} | {body.get('rcclRunNo')} | {stat} | {tot} | {diff} | {'✅' if ok else '❌'} {verdict} |",
     ])
     return 0 if ok else 1
 
