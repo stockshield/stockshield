@@ -1,9 +1,13 @@
 # 정기 대사 결과 확인 (ADM_REC_001 #4, 기획서 11장)
 #
-# - 메인 서버의 정기 대사는 평일 16:00(KST)에 시작하고, 실패하면 1분 간격으로 최대 10번 다시 시도한다.
-#   그래서 16:20(KST)에 결과를 확인한다. GitHub 예약 시각은 UTC라 "20 7 * * 1-5"다.
-#   GitHub 예약 실행은 몇 분 늦게 시작될 수 있다.
-# - 실패(불일치 계좌, 대사 실패, 기록 없음, 서버 오류)면 이 워크플로가 실패해 저장소 관리자에게 알림 메일이 간다.
+# - 메인 서버의 정기 대사는 휴장일과 상관없이 평일 16:00(KST)에 시작하고, 실패하면 1분 간격으로 최대 10번 다시 시도한다.
+# - 예약 두 번 (GitHub 예약 시각은 UTC):
+#   · 평일 16:20 KST "20 7 * * 1-5"  → 오늘 대사
+#   · 평일 08:50 KST "50 23 * * 0-4" → 직전 평일 대사(월요일 아침이면 금요일)
+#   GitHub 예약 실행은 몇 시간까지 늦어질 수 있다(11/16 16:20 예약이 11/17 02:04에 돎).
+#   EC2는 평일 08:40~16:30에만 켜져 있어, 16:20 실행이 늦어지면 아침 실행이 대신 확인한다.
+# - 서버에 연결하지 못하면(EC2 꺼짐) 실패로 치지 않고 요약에 '서버 꺼짐, 확인 못 함'만 남긴다.
+#   서버가 답했는데 불일치 계좌·FAILED·기록 없음·401·서버 오류면 실패 → 저장소 관리자에게 알림 메일.
 # - 필요한 설정 (Settings → Secrets and variables → Actions)
 #   · Secrets  INTERNAL_TOKEN: 배포 서버 .env의 INTERNAL_TOKEN과 같은 값
 #   · Variables DEPLOY_BASE_URL: 배포 주소 (없으면 http://13.55.65.203)
@@ -13,7 +17,8 @@ name: reconcile
 
 on:
   schedule:
-    - cron: "20 7 * * 1-5"
+    - cron: "20 7 * * 1-5"     # 16:20 KST, 오늘 대사
+    - cron: "50 23 * * 0-4"    # 08:50 KST(월~금), 직전 평일 대사
   workflow_dispatch:
     inputs:
       rcclDt:
@@ -57,4 +62,5 @@ jobs:
           BASE_URL: ${{ vars.DEPLOY_BASE_URL || 'http://13.55.65.203' }}
           INTERNAL_TOKEN: ${{ secrets.INTERNAL_TOKEN }}
           RCCL_DT: ${{ github.event.inputs.rcclDt }}
+          RCCL_TARGET: ${{ github.event.schedule == '50 23 * * 0-4' && 'prev-weekday' || 'today' }}
         run: python3 .github/scripts/reconcile_check.py
