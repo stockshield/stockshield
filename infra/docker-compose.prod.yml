@@ -145,6 +145,10 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:?infra/.env 에 CORS_ALLOWED_ORIGINS 를 설정하세요(배포 주소와 글자 그대로 같게)}
       DEMO_MODE: ${DEMO_MODE:-false}
       FINLIGHT_API_KEY: ${FINLIGHT_API_KEY:-}
+      # 호가 조회(/orderbook)용 KIS REST. 수집기와 같은 키
+      KIS_APP_KEY: ${KIS_APP_KEY:-}
+      KIS_APP_SECRET: ${KIS_APP_SECRET:-}
+      KIS_REST_URL: ${KIS_REST_URL:-https://openapi.koreainvestment.com:9443}
       JAVA_TOOL_OPTIONS: "-Xms512m -Xmx1536m"
       TZ: Asia/Seoul
     networks: [stockshield]

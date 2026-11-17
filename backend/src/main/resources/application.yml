@@ -107,6 +107,16 @@ stockshield:
     # 10초 안에 답이 없으면 실패(FAILED)로 저장 (FDS_AI_001 #4)
     timeout: 10s
     connect-timeout: 2s
+  # 한국투자증권 REST (메인 서버의 호가 조회). 키는 수집기와 같은 실전 키, 화면에는 절대 내보내지 않는다
+  kis:
+    rest-url: ${KIS_REST_URL:https://openapi.koreainvestment.com:9443}
+    app-key: ${KIS_APP_KEY:}
+    app-secret: ${KIS_APP_SECRET:}
+    timeout: 3s
+  # 호가 캐시: 장중 2초, 장 밖 60초. 같은 종목은 캐시 주기당 KIS 1번
+  orderbook:
+    open-ttl: PT2S
+    closed-ttl: PT60S
   # 뉴스 수집 (윤제정 영역, NEWS_COL_001·NEWS_AI_001). finlight 무료 플랜 월 5,000건 안에서 평일 07~20시 10분마다
   news:
     enabled: ${NEWS_ENABLED:true}
