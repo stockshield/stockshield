@@ -1323,7 +1323,7 @@ function OrderBook({ stock, orderbook, orderbookUnavailable = false, onSelectPri
   );
 }
 
-// KRX 정규장 개장/마감 상태 계산 (평일 09:00 ~ 15:30 KST)
+// KRX 정규장 개장·동시호가·마감 상태 계산 (주문 가능: 평일 09:00~15:20 KST, 15:20~15:30 장 마감 동시호가)
 function getKrxMarketStatus() {
   const now = new Date();
   // 한국 표준시 (KST = UTC+9) 기준 계산
@@ -1336,24 +1336,31 @@ function getKrxMarketStatus() {
   const totalMinutes = hours * 60 + minutes;
 
   const isWeekday = day >= 1 && day <= 5;
-  // 정규장: 09:00(540분) ~ 15:30(930분)
-  const isOpen = isWeekday && totalMinutes >= 540 && totalMinutes <= 930;
+  // 주문 가능 정규장: 09:00(540분) ~ 15:20(920분)
+  const isOpen = isWeekday && totalMinutes >= 540 && totalMinutes <= 920;
+  // 장 마감 동시호가: 15:20 초과 ~ 15:30(930분)
+  const isClosingAuction = isWeekday && totalMinutes > 920 && totalMinutes <= 930;
 
   let reason = '';
   if (!isWeekday) {
     reason = day === 0 ? '일요일 휴장' : '토요일 휴장';
   } else if (totalMinutes < 540) {
     reason = '정규장 개장 전 (09:00 시작)';
+  } else if (isClosingAuction) {
+    reason = '장 마감 동시호가 (15:20~15:30 · 주문 불가)';
   } else {
-    reason = '정규장 마감 (15:30 마감)';
+    reason = '정규장 마감 (15:20 주문 마감)';
   }
 
   return {
     isOpen,
-    statusText: isOpen ? 'LIVE' : '장마감',
+    isClosingAuction,
+    statusText: isOpen ? 'LIVE' : isClosingAuction ? '장 마감 동시호가(주문 불가)' : '장마감',
     tooltip: isOpen
-      ? `KRX 정규장 운영 중 (09:00~15:30 KST) · 지수 표시값은 예시`
-      : `KRX 정규장 마감 (${reason} · 정규장 평일 09:00~15:30 KST)`,
+      ? 'KRX 정규장 운영 중 (09:00~15:20 KST · 실시간 지수 연동)'
+      : isClosingAuction
+      ? '장 마감 동시호가 시간입니다 (15:20~15:30 KST · 주문 불가)'
+      : `KRX 정규장 마감 (${reason} · 주문 가능 평일 09:00~15:20 KST)`,
   };
 }
 

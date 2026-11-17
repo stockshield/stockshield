@@ -258,7 +258,10 @@ export default function NewsPanel({ currentStock }) {
                       {activeTab === 'ALL' ? (item.author || '전체 증시') : (currentStock?.name || '종목')} 뉴스
                     </span>
                     {item.sentiment != null && (
-                      <span className="news-related-badge">
+                      <span
+                        className="news-related-badge"
+                        title="AI가 기사 논조를 -1.0(부정)~+1.0(긍정)으로 매긴 값, 매매 권유 아님"
+                      >
                         감성 {Number(item.sentiment).toFixed(2)}
                       </span>
                     )}
@@ -320,10 +323,13 @@ export default function NewsPanel({ currentStock }) {
         )}
       </div>
 
-      {/* 하단 투자 참고용·교육 목적 고지 및 출처 안내 */}
-      <div className="news-panel-footer">
+      {/* 하단 투자 참고용·교육 목적 고지 및 Finlight 출처 안내 */}
+      <div className="news-panel-footer" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
         <span>
-          ※ 본 뉴스 및 AI 요약·감성 분석은 <b>투자 참고용·교육 목적</b>으로 제공되며, 실제 투자 판단의 근거로 사용할 수 없습니다.
+          ※ <b>AI 감성 점수</b>: AI가 기사 논조를 <b>-1.0(부정) ~ +1.0(긍정)</b>으로 산출한 지표이며, 매매 권유가 아닙니다.
+        </span>
+        <span>
+          출처: <b>Finlight 글로벌 금융 뉴스 피드</b> 실시간 수집 및 AI 요약 · 본 뉴스 정보는 <b>투자 참고용·교육 목적</b>으로만 제공됩니다.
         </span>
       </div>
     </section>
