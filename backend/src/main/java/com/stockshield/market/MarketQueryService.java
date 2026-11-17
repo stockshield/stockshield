@@ -28,6 +28,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.stockshield.common.error.ApiException;
 import com.stockshield.common.error.ErrorCode;
 import com.stockshield.fds.risk.StockRiskJudge;
+import com.stockshield.order.MarketHours;
 
 /**
  * 시세·종목 조회 (API 명세서 'API_명세서' 10~13행, MKT_VIEW_001·002, FDS_MKT_001).
@@ -52,13 +53,24 @@ public class MarketQueryService {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final MarketHours marketHours;
 
     public MarketQueryService(StringRedisTemplate redis, JdbcTemplate jdbcTemplate, ObjectMapper objectMapper,
-                              Clock clock) {
+                              Clock clock, MarketHours marketHours) {
         this.redis = redis;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.clock = clock;
+        this.marketHours = marketHours;
+    }
+
+    /**
+     * 시세 지연을 판단하는 시간인가: 주문 가능 시간(평일 09:00~15:20, MarketHours.isOrderable) 안이고
+     * 개장 뒤 60초가 지났을 때만. 장 마감 동시호가(15:20~15:30)와 장 밖에는 체결이 없는 게 정상이라 지연으로 보지 않는다
+     * (11/17 15:22 동시호가에 전 종목이 지연으로 판정됨, 조성우 #40과 경계를 맞춤)
+     */
+    public boolean judgesDelay(LocalDateTime now) {
+        return marketHours.isOrderable(now) && marketHours.isOrderable(now.minus(StockRiskJudge.STALE_AFTER));
     }
 
     // ------------------------------------------------------------------ 10행: 종목 자동완성 검색
@@ -214,11 +226,16 @@ public class MarketQueryService {
         return prices.stream().noneMatch(p -> !isStale(p));
     }
 
+    /** 지연 판단 시간(judgesDelay)에만 60초 기준으로 본다. 그 밖에는 마지막 시세를 지연 없이 보여 준다 */
     private boolean isStale(JsonNode price) {
+        LocalDateTime now = LocalDateTime.now(clock);
+        if (!judgesDelay(now)) {
+            return false;
+        }
         try {
             LocalDateTime ts = OffsetDateTime.parse(price.path("prcTs").asText())
                     .atZoneSameInstant(KST).toLocalDateTime();
-            return isStale(ts, LocalDateTime.now(clock));
+            return isStale(ts, now);
         } catch (RuntimeException e) {
             return true;
         }
