@@ -55,7 +55,9 @@ public enum ErrorCode {
     LOCK_TIMEOUT(HttpStatus.SERVICE_UNAVAILABLE, "요청이 몰려 처리하지 못했습니다. 잠시 후 다시 시도하세요."),
     PRICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "시세를 불러올 수 없어 지금은 주문할 수 없습니다."),
     AUTH_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "지금은 인증할 수 없습니다."),
-    SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "서비스 점검 중입니다.");
+    SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "서비스 점검 중입니다."),
+    // 한국투자증권 호가 조회 실패, 마지막 호가도 없음 (차트·호가창 합의 5절). 화면은 '호가 일시 중단'
+    ORDERBOOK_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "호가를 불러올 수 없습니다. 잠시 후 다시 시도하세요.");
 
     private final HttpStatus status;
     private final String message;

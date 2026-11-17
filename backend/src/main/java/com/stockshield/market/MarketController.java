@@ -18,9 +18,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class MarketController {
 
     private final MarketQueryService service;
+    private final OrderbookService orderbook;
 
-    public MarketController(MarketQueryService service) {
+    public MarketController(MarketQueryService service, OrderbookService orderbook) {
         this.service = service;
+        this.orderbook = orderbook;
     }
 
     /** 종목 자동완성 검색 (10행) */
@@ -39,6 +41,12 @@ public class MarketController {
     @GetMapping("/stocks/{tckCd}")
     public Map<String, Object> detail(@PathVariable String tckCd) {
         return service.detail(tckCd);
+    }
+
+    /** 종목 호가 10단계 (차트·호가창 합의 5절). 화면이 3초마다 부른다. KIS 실패면 503 ORDERBOOK_UNAVAILABLE */
+    @GetMapping("/stocks/{tckCd}/orderbook")
+    public Map<String, Object> orderbook(@PathVariable String tckCd) {
+        return orderbook.orderbook(tckCd);
     }
 
     /** 위험 의심 종목 목록. 시세가 60초 넘게 끊기면 빈 목록 (13행, FDS_MKT_001 #4) */
