@@ -26,7 +26,7 @@ public class PriceReader {
     }
 
     static final String PRICE_KEY = "price:";
-    static final Duration STALE_AFTER = Duration.ofSeconds(60);
+    public static final Duration STALE_AFTER = Duration.ofSeconds(60);
     /** 최대 주문 수량(1,000,000)을 곱해도 long을 넘지 않는 값. NUMERIC(15,0)에도 들어감 */
     static final long MAX_PRICE = Long.MAX_VALUE / 1_000_000L;
 

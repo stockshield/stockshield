@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -136,6 +137,45 @@ class AccountQueryApiTest extends LedgerTestSupport {
                 .andExpect(jsonPath("$[0].currentPrice").isEmpty())
                 .andExpect(jsonPath("$[0].evalAmt").value(100_000))
                 .andExpect(jsonPath("$[0].evalPnl").value(0))
+                .andExpect(jsonPath("$[0].priceDelayed").value(true));
+    }
+
+    @Test
+    @DisplayName("지연은 주문 가능 시간(09:00~15:20, 개장 60초 뒤)에만 판단한다. 동시호가·장 밖·개장 직후엔 오래된 시세도 지연이 아니고, 시세가 없는 종목은 언제나 지연이다")
+    void delayJudgedOnlyInOrderableHours() throws Exception {
+        Trader t = newTraderAt(MARKET_OPEN);
+        putPriceNow(SAMSUNG, 70_000);
+        mockMvc.perform(orderRequest(t, orderBody(SAMSUNG, "BUY", 10, newKey()))).andExpect(status().isCreated());
+        putPriceNow(HYNIX, 50_000);
+        mockMvc.perform(orderRequest(t, orderBody(HYNIX, "BUY", 2, newKey()))).andExpect(status().isCreated());
+
+        LocalDateTime lastTick = LocalDateTime.of(2026, 11, 16, 15, 18, 58);
+        putPrice(SAMSUNG, 71_000, seoul(lastTick));
+        putPrice(HYNIX, 51_000, seoul(lastTick));
+
+        t = moveTo(t, LocalDateTime.of(2026, 11, 16, 15, 19, 59));   // 61초 전 시세, 주문 가능 시간
+        mockMvc.perform(me("summary", t)).andExpect(jsonPath("$.priceDelayed").value(true));
+
+        t = moveTo(t, LocalDateTime.of(2026, 11, 16, 15, 20, 0));    // 장 마감 동시호가
+        mockMvc.perform(me("summary", t)).andExpect(jsonPath("$.priceDelayed").value(false));
+        mockMvc.perform(me("holdings", t))
+                .andExpect(jsonPath("$[1].priceDelayed").value(false))
+                .andExpect(jsonPath("$[1].currentPrice").value(71_000));
+
+        t = moveTo(t, LocalDateTime.of(2026, 11, 17, 8, 30));        // 다음 날 개장 전
+        mockMvc.perform(me("summary", t)).andExpect(jsonPath("$.priceDelayed").value(false));
+
+        t = moveTo(t, LocalDateTime.of(2026, 11, 17, 9, 0, 59));     // 개장 60초 안
+        mockMvc.perform(me("summary", t)).andExpect(jsonPath("$.priceDelayed").value(false));
+
+        t = moveTo(t, LocalDateTime.of(2026, 11, 17, 9, 1, 0));      // 개장 60초 뒤, 전날 시세
+        mockMvc.perform(me("summary", t)).andExpect(jsonPath("$.priceDelayed").value(true));
+
+        t = moveTo(t, LocalDateTime.of(2026, 11, 17, 15, 25));
+        redis.delete("price:" + HYNIX);
+        mockMvc.perform(me("holdings", t))
+                .andExpect(jsonPath("$[0].tckCd").value(HYNIX))
+                .andExpect(jsonPath("$[0].currentPrice").isEmpty())
                 .andExpect(jsonPath("$[0].priceDelayed").value(true));
     }
 

@@ -33,6 +33,7 @@ import com.stockshield.ledger.PriceUnavailableException;
 import com.stockshield.ledger.StockMasterReader;
 import com.stockshield.ledger.TradeHistory;
 import com.stockshield.ledger.TradeHistoryRepository;
+import com.stockshield.order.MarketHours;
 import com.stockshield.order.StockOrder;
 import com.stockshield.order.StockOrderRepository;
 
@@ -56,17 +57,20 @@ public class AccountQueryService {
     private final TradeHistoryRepository trades;
     private final StockMasterReader stocks;
     private final PriceReader priceReader;
+    private final MarketHours marketHours;
     private final Clock clock;
 
     public AccountQueryService(AccountSnapshotReader snapshots, AccountRepository accounts,
                                StockOrderRepository orders, TradeHistoryRepository trades,
-                               StockMasterReader stocks, PriceReader priceReader, Clock clock) {
+                               StockMasterReader stocks, PriceReader priceReader, MarketHours marketHours,
+                               Clock clock) {
         this.snapshots = snapshots;
         this.accounts = accounts;
         this.orders = orders;
         this.trades = trades;
         this.stocks = stocks;
         this.priceReader = priceReader;
+        this.marketHours = marketHours;
         this.clock = clock;
     }
 
@@ -168,6 +172,10 @@ public class AccountQueryService {
      */
     private List<Valued> value(List<Holding> holdings) {
         LocalDateTime now = LocalDateTime.now(clock);
+        // 시세 화면(MarketQueryService.judgesDelay)과 같은 기준: 주문 가능 시간이고 개장 60초 뒤일 때만 지연 판단함.
+        // 동시호가·장 밖에는 체결이 없는 게 정상이라 마지막 시세를 지연으로 보지 않음(대기 목록 #85 보완)
+        boolean judgesDelay = marketHours.isOrderable(now)
+                && marketHours.isOrderable(now.minus(PriceReader.STALE_AFTER));
         boolean redisDown = false;
         List<Valued> valued = new ArrayList<>();
         for (Holding h : holdings) {
@@ -186,7 +194,7 @@ public class AccountQueryService {
             if (quote.isPresent()) {
                 long evalAmt = Math.multiplyExact(quote.get().currentPrice(), h.getHldQty());
                 valued.add(new Valued(h, buyAmtExact, buyAmt, quote.get().currentPrice(), evalAmt,
-                        priceReader.isStale(quote.get(), now)));
+                        judgesDelay && priceReader.isStale(quote.get(), now)));
             } else {
                 valued.add(new Valued(h, buyAmtExact, buyAmt, null, buyAmt, true));
             }
