@@ -191,6 +191,51 @@ export async function parseApiResponse(res) {
 // 1-2. 토큰 첨부·재발급·오류 처리 공통화
 let refreshPending = null;
 
+// Access Token 재발급 (REST 401 및 WebSocket STOMP 인증 만료 공용, 동시 중복 요청 방지)
+export async function refreshAccessToken() {
+  const currentTokens = getAuthTokens();
+  if (!currentTokens?.refreshToken) {
+    clearAuthTokens();
+    clearActiveSession();
+    return false;
+  }
+  if (!refreshPending) {
+    refreshPending = (async () => {
+      try {
+        const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Device-Id': getDeviceId(),
+          },
+          body: JSON.stringify({ refreshToken: currentTokens.refreshToken }),
+        });
+        if (!refreshRes.ok) {
+          clearAuthTokens();
+          clearActiveSession();
+          return false;
+        }
+        const refreshData = await refreshRes.json();
+        if (refreshData?.accessToken) {
+          setAuthTokens({
+            ...currentTokens,
+            accessToken: refreshData.accessToken,
+          });
+          return true;
+        }
+        clearAuthTokens();
+        clearActiveSession();
+        return false;
+      } catch (e) {
+        return false;
+      }
+    })().finally(() => {
+      refreshPending = null;
+    });
+  }
+  return refreshPending;
+}
+
 export async function apiFetch(endpoint, options = {}) {
   const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
   const url = `${API_BASE}${path}`;
@@ -221,50 +266,9 @@ export async function apiFetch(endpoint, options = {}) {
     path !== '/auth/login' &&
     path !== '/auth/refresh'
   ) {
-    const currentTokens = getAuthTokens();
-    if (currentTokens?.refreshToken) {
-      if (!refreshPending) {
-        refreshPending = (async () => {
-          try {
-            const refreshRes = await fetch(`${API_BASE}/auth/refresh`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Device-Id': getDeviceId(),
-              },
-              body: JSON.stringify({ refreshToken: currentTokens.refreshToken }),
-            });
-            if (!refreshRes.ok) {
-              clearAuthTokens();
-              clearActiveSession();
-              return false;
-            }
-            const refreshData = await refreshRes.json();
-            if (refreshData?.accessToken) {
-              setAuthTokens({
-                ...currentTokens,
-                accessToken: refreshData.accessToken,
-              });
-              return true;
-            }
-            clearAuthTokens();
-            clearActiveSession();
-            return false;
-          } catch (e) {
-            return false;
-          }
-        })().finally(() => {
-          refreshPending = null;
-        });
-      }
-
-      const refreshed = await refreshPending;
-      if (refreshed) {
-        res = await makeRequest();
-      }
-    } else {
-      clearAuthTokens();
-      clearActiveSession();
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      res = await makeRequest();
     }
   }
 
@@ -747,7 +751,7 @@ export async function registerUser({
 // - 200 OK: { accessToken, refreshToken, roleCd } -> 이어서 fetchMyAccount() 호출
 // - 202 Accepted: { authRequired: true, authId, mskEmlAddr } -> 새 접속 추가 인증 화면으로 분기
 export async function authenticateUser(id, password) {
-  const cleanId = (id || '').trim();
+  const cleanId = (id || '').trim().toLowerCase();
   if (!cleanId || !password) {
     return { success: false, message: '아이디와 비밀번호를 모두 입력해 주세요.' };
   }
@@ -1242,8 +1246,14 @@ export async function fetchStockDetail(tckCd, signal) {
 }
 
 export async function fetchStockPeriodCandles(tckCd, interval = '1일', signal) {
+  const apiInterval =
+    interval === 'D' || interval === '1일'
+      ? 'D'
+      : interval === 'W' || interval === '1주'
+      ? 'W'
+      : 'M';
   const res = await apiRequest(
-    `/market/stocks/${encodeURIComponent(tckCd)}/candles?interval=${encodeURIComponent(interval)}`,
+    `/market/stocks/${encodeURIComponent(tckCd)}/candles?interval=${encodeURIComponent(apiInterval)}`,
     {
       signal,
       skipAuth: true,
@@ -1252,7 +1262,23 @@ export async function fetchStockPeriodCandles(tckCd, interval = '1일', signal) 
   if (!res.ok) {
     return { success: false, status: res.status, code: res.code, message: res.message, candles: [] };
   }
-  return { success: true, candles: Array.isArray(res.data) ? res.data : [] };
+  const candles = Array.isArray(res.data?.candles)
+    ? res.data.candles
+    : Array.isArray(res.data)
+    ? res.data
+    : [];
+  return { success: true, candles };
+}
+
+export async function fetchStockNews(tckCd, signal) {
+  const res = await apiRequest(`/news/stocks/${encodeURIComponent(tckCd)}`, {
+    signal,
+    skipAuth: true,
+  });
+  if (!res.ok) {
+    return { success: false, status: res.status, code: res.code, message: res.message, items: [] };
+  }
+  return { success: true, items: Array.isArray(res.data) ? res.data : [] };
 }
 
 export async function fetchStockOrderbook(tckCd, signal) {
