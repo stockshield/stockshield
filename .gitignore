@@ -25,3 +25,6 @@ yarn-error.log*
 .AppleDouble
 .LSOverride
 Thumbs.db
+
+# Python 캐시
+__pycache__/
