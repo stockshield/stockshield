@@ -17,6 +17,8 @@ public class MarketHours {
 
     static final LocalTime OPEN = LocalTime.of(9, 0);
     static final LocalTime CLOSE = LocalTime.of(15, 30);
+    // 15:20~15:30 장 마감 동시호가에는 체결이 없어 즉시 체결할 가격이 없으므로 주문은 15:20 전까지만 받음(대기 목록 #95)
+    static final LocalTime ORDER_CLOSE = LocalTime.of(15, 20);
 
     private final boolean demoMode;
     private final Set<LocalDate> holidays;
@@ -32,8 +34,16 @@ public class MarketHours {
                 .collect(Collectors.toUnmodifiableSet());
     }
 
-    /** 시연 모드에서는 검사하지 않음(재생 시세로 주문, MKT_TICK_001 #2) */
     public boolean isOpen(LocalDateTime now) {
+        return isWithin(now, CLOSE);
+    }
+
+    public boolean isOrderable(LocalDateTime now) {
+        return isWithin(now, ORDER_CLOSE);
+    }
+
+    private boolean isWithin(LocalDateTime now, LocalTime close) {
+        // 시연 모드에서는 검사하지 않음(재생 시세로 주문, MKT_TICK_001 #2)
         if (demoMode) {
             return true;
         }
@@ -42,6 +52,6 @@ public class MarketHours {
             return false;
         }
         LocalTime time = now.toLocalTime();
-        return !time.isBefore(OPEN) && time.isBefore(CLOSE);
+        return !time.isBefore(OPEN) && time.isBefore(close);
     }
 }

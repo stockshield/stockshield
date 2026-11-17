@@ -9,7 +9,7 @@ import java.time.format.DateTimeParseException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-/** TRD_ORD_001 #2: 휴장일을 뺀 평일 09:00:00 이상 15:30:00 미만, 시연 모드면 검사 생략 */
+/** TRD_ORD_001 #2: 휴장일을 뺀 평일 09:00:00 이상 15:30:00 미만, 주문은 15:20:00 미만(대기 목록 #95), 시연 모드면 검사 생략 */
 class MarketHoursTest {
 
     private final MarketHours hours = new MarketHours(false, "2026-12-25, 2026-12-31");
@@ -21,6 +21,19 @@ class MarketHoursTest {
         assertThat(hours.isOpen(LocalDateTime.of(2026, 11, 16, 9, 0, 0))).isTrue();
         assertThat(hours.isOpen(LocalDateTime.of(2026, 11, 16, 15, 29, 59))).isTrue();
         assertThat(hours.isOpen(LocalDateTime.of(2026, 11, 16, 15, 30, 0))).isFalse();
+    }
+
+    @Test
+    @DisplayName("주문은 15:20:00 정각부터 받지 않고, 장 마감 동시호가(15:20~15:30)는 장 운영 시간에는 들어간다")
+    void orderableBoundary() {
+        assertThat(hours.isOrderable(LocalDateTime.of(2026, 11, 16, 8, 59, 59))).isFalse();
+        assertThat(hours.isOrderable(LocalDateTime.of(2026, 11, 16, 9, 0, 0))).isTrue();
+        assertThat(hours.isOrderable(LocalDateTime.of(2026, 11, 16, 15, 19, 59))).isTrue();
+        assertThat(hours.isOrderable(LocalDateTime.of(2026, 11, 16, 15, 20, 0))).isFalse();
+        assertThat(hours.isOrderable(LocalDateTime.of(2026, 11, 16, 15, 29, 59))).isFalse();
+        assertThat(hours.isOpen(LocalDateTime.of(2026, 11, 16, 15, 25, 0))).isTrue();
+        assertThat(hours.isOrderable(LocalDateTime.of(2026, 11, 14, 10, 0))).isFalse();   // 토
+        assertThat(hours.isOrderable(LocalDateTime.of(2026, 12, 25, 10, 0))).isFalse();   // 휴장일
     }
 
     @Test
@@ -39,6 +52,7 @@ class MarketHoursTest {
         MarketHours demo = new MarketHours(true, "2026-12-25");
         assertThat(demo.isOpen(LocalDateTime.of(2026, 11, 14, 23, 0))).isTrue();
         assertThat(demo.isOpen(LocalDateTime.of(2026, 12, 25, 10, 0))).isTrue();
+        assertThat(demo.isOrderable(LocalDateTime.of(2026, 11, 16, 15, 25, 0))).isTrue();
     }
 
     @Test

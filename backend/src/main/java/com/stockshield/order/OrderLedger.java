@@ -123,12 +123,12 @@ public class OrderLedger {
         return OrderReply.of(order, trade, true);
     }
 
-    /** 확인 순서: 계좌 상태 → 장 운영 시간 → 시세 지연 → 예수금(매수)·보유 수량(매도). 통과하면 null */
+    /** 확인 순서: 계좌 상태 → 주문 가능 시간 → 시세 지연 → 예수금(매수)·보유 수량(매도). 통과하면 null */
     private ErrorCode rejectReason(Account account, Holding holding, OrderCommand cmd, Quote quote, LocalDateTime now) {
         if (!account.isActive()) {
             return ErrorCode.ACCOUNT_LOCKED;
         }
-        if (!marketHours.isOpen(now)) {
+        if (!marketHours.isOrderable(now)) {
             return ErrorCode.MARKET_CLOSED;
         }
         if (quote == null || priceReader.isStale(quote, now)) {
