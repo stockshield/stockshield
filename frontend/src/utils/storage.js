@@ -129,7 +129,7 @@ export const ERROR_MESSAGES = {
   LGN_ID_DUPLICATED: '이미 사용 중인 아이디입니다.',
   AI_RETRY_NOT_ALLOWED: 'AI 설명이 실패한 건만 다시 요청할 수 있습니다.',
   AUTH_CODE_EXPIRED: '인증 코드가 만료되었습니다. 처음부터 다시 진행하세요.',
-  MARKET_CLOSED: '장 운영 시간(휴장일 제외 평일 09:00~15:30)이 아닙니다.',
+  MARKET_CLOSED: '주문 가능 시간(휴장일 제외 평일 09:00~15:20)이 아닙니다.',
   PRICE_STALE: '시세가 지연되어 지금은 주문할 수 없습니다.',
   INSUFFICIENT_BALANCE: '예수금이 부족합니다.',
   INSUFFICIENT_HOLDING: '보유 수량이 부족합니다.',
