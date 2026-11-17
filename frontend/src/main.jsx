@@ -412,6 +412,168 @@ function aggregateMonthlyBars(monthlyCandles = [], monthsPerBar = 3) {
   return result;
 }
 
+function parseKstTick(prcTs) {
+  const parsed = prcTs ? new Date(prcTs) : new Date();
+  const baseMs = Number.isNaN(parsed.getTime()) ? Date.now() : parsed.getTime();
+  const kst = new Date(baseMs + 9 * 3600_000);
+  const yyyy = kst.getUTCFullYear();
+  const mmNum = kst.getUTCMonth() + 1;
+  const ddNum = kst.getUTCDate();
+  const hhNum = kst.getUTCHours();
+  const miNum = kst.getUTCMinutes();
+  const mm = String(mmNum).padStart(2, '0');
+  const dd = String(ddNum).padStart(2, '0');
+  const hh = String(hhNum).padStart(2, '0');
+  const mi = String(miNum).padStart(2, '0');
+  const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+  const dayName = dayNames[kst.getUTCDay()];
+  return {
+    yyyy,
+    mmNum,
+    ddNum,
+    ymd: `${yyyy}${mm}${dd}`,
+    bsMi: `${yyyy}${mm}${dd}${hh}${mi}`,
+    mm,
+    dd,
+    hh,
+    mi,
+    dayName,
+  };
+}
+
+function getWeekMondayYmd(ymd) {
+  const s = String(ymd || '');
+  if (s.length < 8) return s;
+  const d = new Date(Date.UTC(Number(s.slice(0, 4)), Number(s.slice(4, 6)) - 1, Number(s.slice(6, 8))));
+  const day = d.getUTCDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setUTCDate(d.getUTCDate() + diff);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}${m}${dd}`;
+}
+
+function applyTickToMinuteCandles(prev, tickPrice, prcTs) {
+  if (!tickPrice || tickPrice <= 0) return prev;
+  const t = parseKstTick(prcTs);
+  const dateStr = `${t.yyyy}.${t.mm}.${t.dd} ${t.hh}:${t.mi}`;
+  const label = `${t.hh}:${t.mi}`;
+
+  if (!prev || prev.length === 0) {
+    return [{
+      bsMi: t.bsMi,
+      open: tickPrice,
+      high: tickPrice,
+      low: tickPrice,
+      close: tickPrice,
+      volume: 0,
+      dateStr,
+      label,
+    }];
+  }
+
+  const last = prev[prev.length - 1];
+  const lastBsMi = String(last.bsMi || '');
+  if (t.bsMi === lastBsMi) {
+    return [
+      ...prev.slice(0, -1),
+      {
+        ...last,
+        close: tickPrice,
+        high: Math.max(last.high, tickPrice),
+        low: Math.min(last.low, tickPrice),
+      },
+    ];
+  }
+  if (t.bsMi > lastBsMi) {
+    return [
+      ...prev,
+      {
+        bsMi: t.bsMi,
+        open: tickPrice,
+        high: tickPrice,
+        low: tickPrice,
+        close: tickPrice,
+        volume: 0,
+        dateStr,
+        label,
+      },
+    ].slice(-390);
+  }
+  return prev;
+}
+
+function applyTickToPeriodCandles(prev, tickPrice, tickVol, prcTs, interval) {
+  if (!tickPrice || tickPrice <= 0 || !prev || prev.length === 0) return prev;
+  const t = parseKstTick(prcTs);
+  const last = prev[prev.length - 1];
+  const lastYmd = String(last.bsMi || '');
+  if (lastYmd.length < 8) return prev;
+
+  let isSameBucket = false;
+  let isNextBucket = false;
+  let newDateStr = `${t.yyyy}.${t.mm}.${t.dd} (${t.dayName})`;
+  let newLabel = `${t.mm}/${t.dd}`;
+
+  if (interval === '1일') {
+    isSameBucket = lastYmd === t.ymd;
+    isNextBucket = t.ymd > lastYmd;
+  } else if (interval === '1주') {
+    const lastW = getWeekMondayYmd(lastYmd);
+    const tickW = getWeekMondayYmd(t.ymd);
+    isSameBucket = lastW === tickW;
+    isNextBucket = tickW > lastW;
+    newDateStr = `${t.yyyy}.${t.mm}.${t.dd} (주봉)`;
+    newLabel = `${String(t.yyyy).slice(-2)}.${t.mm}.${t.dd}`;
+  } else if (interval === '1개월') {
+    const lastYm = lastYmd.slice(0, 6);
+    const tickYm = t.ymd.slice(0, 6);
+    isSameBucket = lastYm === tickYm;
+    isNextBucket = tickYm > lastYm;
+    newDateStr = `${t.yyyy}년 ${t.mm}월 (월봉)`;
+    newLabel = `${String(t.yyyy).slice(-2)}.${t.mm}`;
+  } else if (['3개월', '6개월', '1년'].includes(interval)) {
+    const bucketMonths = interval === '3개월' ? 3 : interval === '6개월' ? 6 : 12;
+    const lastY = Number(lastYmd.slice(0, 4));
+    const lastM = Number(lastYmd.slice(4, 6));
+    const monthDiff = (t.yyyy * 12 + t.mmNum) - (lastY * 12 + lastM);
+    isSameBucket = monthDiff >= 0 && monthDiff < bucketMonths;
+    isNextBucket = monthDiff >= bucketMonths;
+    newDateStr = `${t.yyyy}.${t.mm} (${interval}봉)`;
+    newLabel = `${String(t.yyyy).slice(-2)}.${t.mm}`;
+  }
+
+  if (isSameBucket) {
+    return [
+      ...prev.slice(0, -1),
+      {
+        ...last,
+        close: tickPrice,
+        high: Math.max(last.high, tickPrice),
+        low: Math.min(last.low, tickPrice),
+        volume: interval === '1일' && tickVol > 0 ? Math.max(Number(last.volume || 0), tickVol) : last.volume,
+      },
+    ];
+  }
+  if (isNextBucket) {
+    return [
+      ...prev,
+      {
+        bsMi: t.ymd,
+        open: tickPrice,
+        high: tickPrice,
+        low: tickPrice,
+        close: tickPrice,
+        volume: tickVol || 0,
+        dateStr: newDateStr,
+        label: newLabel,
+      },
+    ];
+  }
+  return prev;
+}
+
 const CHART_INTERVAL_GROUPS = [
   { group: '분', items: ['1분', '3분', '5분', '10분', '15분', '30분'] },
   { group: '시간', items: ['1시간', '3시간', '6시간'] },
@@ -2855,4 +3017,31 @@ function App() {
   );
 }
 
-createRoot(document.getElementById('root')).render(<App />);
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: '32px', color: '#ff8a98', background: '#0c111b', minHeight: '100vh', fontFamily: 'monospace' }}>
+          <h2 style={{ color: '#fff', marginBottom: '12px' }}>화면 렌더링 오류 발생</h2>
+          <pre style={{ whiteSpace: 'pre-wrap', background: '#161f2e', padding: '16px', borderRadius: '8px', border: '1px solid #ff4d64' }}>
+            {String(this.state.error?.stack || this.state.error?.message || this.state.error)}
+          </pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+createRoot(document.getElementById('root')).render(
+  <AppErrorBoundary>
+    <App />
+  </AppErrorBoundary>
+);
