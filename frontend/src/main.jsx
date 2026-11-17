@@ -1203,13 +1203,13 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
 function OrderBook({ stock, orderbook, orderbookUnavailable = false, onSelectPrice }) {
   const basePrice = Number(stock.price || 0);
   const changeVal = Number(stock.change || 0);
-  // 백엔드 asks·bids는 모두 1단계(현재가에 가까운 쪽)부터 오므로 매도(asks)는 뒤집어서 5단계->1단계 순으로 위에 표시
-  const rawAsks = Array.isArray(orderbook?.asks) ? orderbook.asks.slice(0, 5) : [];
+  // 백엔드 asks·bids는 모두 1단계(현재가에 가까운 쪽)부터 오므로 매도(asks)는 뒤집어서 높은 호가->1호가 순으로 위에 표시 (최대 10단계)
+  const rawAsks = Array.isArray(orderbook?.asks) ? orderbook.asks.slice(0, 10) : [];
   const asks = [...rawAsks].reverse().map((item) => ({
     price: Number(item.prc ?? item.price ?? 0),
     volume: Number(item.rsqn ?? item.volume ?? 0),
   }));
-  const bids = (Array.isArray(orderbook?.bids) ? orderbook.bids.slice(0, 5) : []).map((item) => ({
+  const bids = (Array.isArray(orderbook?.bids) ? orderbook.bids.slice(0, 10) : []).map((item) => ({
     price: Number(item.prc ?? item.price ?? 0),
     volume: Number(item.rsqn ?? item.volume ?? 0),
   }));
@@ -1252,7 +1252,12 @@ function OrderBook({ stock, orderbook, orderbookUnavailable = false, onSelectPri
         <span>호가 (KRW)</span>
         <span>매수잔량</span>
       </div>
-      <div className="book-rows">
+      <div
+        className="book-rows"
+        style={{
+          gridTemplateRows: `repeat(${Math.max(1, asks.length || 5)}, minmax(20px, 1fr)) minmax(28px, 1.2fr) repeat(${Math.max(1, bids.length || 5)}, minmax(20px, 1fr))`,
+        }}
+      >
         {orderbookUnavailable ? (
           <div style={{ gridRow: 'span 5', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px', color: '#f1cc62' }}>
             호가 일시 중단 (503)
@@ -1398,6 +1403,10 @@ function App() {
   const [marketSummary, setMarketSummary] = useState(null);
   const [riskStocksMap, setRiskStocksMap] = useState({}); // { [tckCd]: { tckCd, tckNm, dir, chgRt, reason, dtcTs } }
   const [quotes, setQuotes] = useState({});
+  const [priceFlashMap, setPriceFlashMap] = useState({}); // { [tckCd]: 'up' | 'down' }
+  const priceFlashTimersRef = useRef({});
+  const quotesRef = useRef({});
+  quotesRef.current = quotes;
   const [lastQuoteTime, setLastQuoteTime] = useState(() => Date.now());
   const [quoteError, setQuoteError] = useState('');
   const [realCandles, setRealCandles] = useState([]);
@@ -1458,6 +1467,26 @@ function App() {
     return () => clearInterval(timer);
   }, []);
 
+  // 실시간 가격 변동 시 깜빡임(up/down) 트리거 (MKT_VIEW_001)
+  const triggerPriceFlash = (code, prevPrice, nextPrice) => {
+    const p1 = Number(prevPrice || 0);
+    const p2 = Number(nextPrice || 0);
+    if (!code || p1 <= 0 || p2 <= 0 || p1 === p2) return;
+    const dir = p2 > p1 ? 'up' : 'down';
+    setPriceFlashMap((prev) => ({ ...prev, [code]: dir }));
+    if (priceFlashTimersRef.current[code]) {
+      clearTimeout(priceFlashTimersRef.current[code]);
+    }
+    priceFlashTimersRef.current[code] = setTimeout(() => {
+      setPriceFlashMap((prev) => {
+        if (!prev[code]) return prev;
+        const next = { ...prev };
+        delete next[code];
+        return next;
+      });
+    }, 450);
+  };
+
   // 시장 요약 데이터(GET /market/summary 또는 /topic/ranking 메시지)를 상태에 반영
   const applyMarketSummary = (summaryData) => {
     if (!summaryData) return;
@@ -1481,6 +1510,12 @@ function App() {
       ...(summaryData.topRanks?.volume || []),
     ];
     if (rankItems.length > 0) {
+      const prevQuotes = quotesRef.current;
+      rankItems.forEach((item) => {
+        if (item?.tckCd && item.currentPrice != null) {
+          triggerPriceFlash(item.tckCd, prevQuotes[item.tckCd]?.price, item.currentPrice);
+        }
+      });
       setQuotes((prev) => {
         const next = { ...prev };
         rankItems.forEach((item) => {
@@ -1693,6 +1728,7 @@ function App() {
       const tickPrice = Number(tick.currentPrice ?? 0);
       const tickVol = Number(tick.totalTrdVol ?? 0);
 
+      triggerPriceFlash(tick.tckCd, quotesRef.current[tick.tckCd]?.price, tickPrice);
       setQuotes((prev) => ({
         ...prev,
         [tick.tckCd]: {
@@ -2703,7 +2739,9 @@ function App() {
                         </small>
                       </span>
                       <span className="stock-price">
-                        <b>{qPrice > 0 ? won(qPrice) : '-'}</b>
+                        <b className={priceFlashMap[s.code] ? `price-flash-${priceFlashMap[s.code]}` : ''}>
+                          {qPrice > 0 ? won(qPrice) : '-'}
+                        </b>
                         <small className={qChange >= 0 ? 'rise' : 'fall'}>
                           {qPrice > 0 ? `${qChange >= 0 ? '+' : ''}${Number(qChange).toFixed(2)}%` : '대기'}
                         </small>
@@ -2808,7 +2846,7 @@ function App() {
 
                 {/* 현재가 및 등락률 (종목 정보 우측에 배치) */}
                 <div className="stock-overview-price">
-                  <div className="big-price">
+                  <div className={`big-price ${priceFlashMap[selectedCode] ? `price-flash-${priceFlashMap[selectedCode]}` : ''}`}>
                     {won(stock.price)} <small>KRW</small>
                   </div>
                   {quoteError && (

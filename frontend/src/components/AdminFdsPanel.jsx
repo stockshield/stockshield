@@ -34,6 +34,35 @@ const RULE_NAME_MAP = {
   TRADE_NEW_IP: '신규 IP 주식 주문',
 };
 
+// 계좌 잠금(LOCKED) 긴급 경보 Web Audio 알림음
+function playEmergencyAlertSound() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const notes = [880, 1174.66, 880];
+    notes.forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.value = freq;
+      const start = ctx.currentTime + idx * 0.14;
+      gain.gain.setValueAtTime(0.001, start);
+      gain.gain.exponentialRampToValueAtTime(0.18, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.12);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(start);
+      osc.stop(start + 0.13);
+    });
+    setTimeout(() => {
+      ctx.close().catch(() => {});
+    }, 600);
+  } catch {
+    // 브라우저 오디오 정책 차단 시 무시
+  }
+}
+
 export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, onSessionExpired }) {
   const [activeSection, setActiveSection] = useState('DETECTIONS'); // 'DETECTIONS' | 'RECONCILE' | 'RISK_STOCKS' | 'ACCOUNT_LOCK'
 
@@ -171,6 +200,7 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
     const unsubDetections = stomp.subscribe('/topic/admin/detections', (payload) => {
       if (!payload || !payload.dtcSeq) return;
       if (payload.rsltCd === 'LOCKED') {
+        playEmergencyAlertSound();
         setEmergencyAlerts((prev) => {
           const filtered = prev.filter((item) => item.dtcSeq !== payload.dtcSeq);
           return [payload, ...filtered].slice(0, 5);

@@ -43,8 +43,33 @@ function getStockKeywords(stock) {
   return Array.from(new Set(keywords));
 }
 
+const MARKET_NEWS_STOCKS = [
+  { code: '005930', name: '삼성전자' },
+  { code: '000660', name: 'SK하이닉스' },
+  { code: '035420', name: 'NAVER' },
+  { code: '005380', name: '현대차' },
+  { code: '373220', name: 'LG에너지솔루션' },
+  { code: '068270', name: '셀트리온' },
+  { code: '000270', name: '기아' },
+  { code: '207940', name: '삼성바이오로직스' },
+];
+
+function adaptNewsItem(item, fallbackId, fallbackAuthor) {
+  return {
+    id: item.newsId || item.id || fallbackId,
+    title: item.newsTitl || item.title || '',
+    summary: item.aiSmryCont || item.summary || '',
+    sentiment: item.aiSntmScr,
+    publishedAt: item.pubTs || item.publishedAt || '',
+    url: item.newsUrl || item.url || '#',
+    author: item.author || fallbackAuthor || '증권 뉴스',
+  };
+}
+
 export default function NewsPanel({ currentStock }) {
   const [stockNews, setStockNews] = useState([]);
+  const [allNews, setAllNews] = useState([]);
+  const [activeTab, setActiveTab] = useState('STOCK'); // 'STOCK' | 'ALL'
   const [enabled, setEnabled] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -59,6 +84,58 @@ export default function NewsPanel({ currentStock }) {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  const loadAllNews = async (signal) => {
+    try {
+      const res = await fetch(`${API_BASE}/news`, { signal });
+      if (res.ok) {
+        const data = await res.json();
+        const rawList = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.content)
+          ? data.content
+          : Array.isArray(data?.news)
+          ? data.news
+          : [];
+        const adapted = rawList.map((item, idx) => adaptNewsItem(item, `all-${idx}`, '전체 증시'));
+        setAllNews(adapted);
+        return;
+      }
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+    }
+
+    // /api/v1/news 미구현 시 주요 대표 종목 뉴스를 병합해 전체 증권 뉴스 구성
+    try {
+      const stockMap = new Map();
+      if (currentStock?.code) {
+        stockMap.set(currentStock.code, currentStock.name || currentStock.code);
+      }
+      MARKET_NEWS_STOCKS.forEach((s) => {
+        if (!stockMap.has(s.code)) stockMap.set(s.code, s.name);
+      });
+      const entries = Array.from(stockMap.entries());
+      const results = await Promise.all(entries.map(([code]) => fetchStockNews(code, signal)));
+      const seen = new Set();
+      const merged = [];
+      results.forEach((r, idx) => {
+        if (!r.success) return;
+        const stockLabel = entries[idx][1];
+        r.items.forEach((item, itemIdx) => {
+          const adapted = adaptNewsItem(item, `mkt-${entries[idx][0]}-${itemIdx}`, stockLabel);
+          const key = adapted.id || adapted.url || adapted.title;
+          if (adapted.title && !seen.has(key)) {
+            seen.add(key);
+            merged.push(adapted);
+          }
+        });
+      });
+      merged.sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0));
+      setAllNews(merged);
+    } catch {
+      // ignore
+    }
+  };
+
   const loadStockNews = async (signal) => {
     const tckCd = currentStock?.code;
     if (!tckCd) {
@@ -71,15 +148,9 @@ export default function NewsPanel({ currentStock }) {
       if (!res.success) {
         throw new Error(res.message || `HTTP ${res.status}`);
       }
-      const adapted = res.items.map((item, idx) => ({
-        id: item.newsId || item.id || `${tckCd}-${idx}`,
-        title: item.newsTitl || item.title || '',
-        summary: item.aiSmryCont || item.summary || '',
-        sentiment: item.aiSntmScr,
-        publishedAt: item.pubTs || item.publishedAt || '',
-        url: item.newsUrl || item.url || '#',
-        author: item.author || currentStock?.name || '뉴스',
-      }));
+      const adapted = res.items.map((item, idx) =>
+        adaptNewsItem(item, `${tckCd}-${idx}`, currentStock?.name || '뉴스')
+      );
       setStockNews(adapted);
       setEnabled(true);
       setLastUpdated(adapted[0]?.publishedAt || new Date().toISOString());
@@ -96,23 +167,28 @@ export default function NewsPanel({ currentStock }) {
   useEffect(() => {
     const controller = new AbortController();
     loadStockNews(controller.signal);
-    const timer = setInterval(() => loadStockNews(), 60000);
+    loadAllNews(controller.signal);
+    const timer = setInterval(() => {
+      loadStockNews();
+      loadAllNews();
+    }, 60000);
     return () => {
       controller.abort();
       clearInterval(timer);
     };
   }, [currentStock?.code]);
 
-  // 검색어 필터링 결과
+  // 탭 및 검색어 필터링 결과
   const displayedNews = useMemo(() => {
-    if (!searchQuery.trim()) return stockNews;
+    const baseList = activeTab === 'ALL' ? allNews : stockNews;
+    if (!searchQuery.trim()) return baseList;
     const q = searchQuery.trim().toLowerCase();
-    return stockNews.filter(
+    return baseList.filter(
       (item) =>
         item.title.toLowerCase().includes(q) ||
         (item.summary && item.summary.toLowerCase().includes(q))
     );
-  }, [stockNews, searchQuery]);
+  }, [activeTab, stockNews, allNews, searchQuery]);
 
   // 큰 화면: 한 줄에 3개씩 총 6개 (2줄)
   // 좁은 화면: 한 줄에 2개씩 총 4개 (2줄)
@@ -151,49 +227,15 @@ export default function NewsPanel({ currentStock }) {
           <button
             type="button"
             className={`news-refresh-btn ${loading ? 'loading' : ''}`}
-            onClick={() => loadStockNews()}
+            onClick={() => {
+              loadStockNews();
+              loadAllNews();
+            }}
             title="뉴스 즉시 새로고침"
             aria-label="뉴스 즉시 새로고침"
           >
             <RefreshCw size={14} />
           </button>
-        </div>
-      </div>
-
-      {/* 필터 탭 & 검색창 */}
-      <div className="news-filter-bar">
-        <div className="news-tabs">
-          <button
-            type="button"
-            className="news-tab active"
-          >
-            <Sparkles size={12} />
-            {currentStock?.name || '종목'} 최신 뉴스 <span className="tab-count">{stockNews.length}</span>
-          </button>
-        </div>
-
-        <div className="news-search-wrap">
-          <Search size={14} />
-          <input
-            type="text"
-            placeholder="기사 제목, 키워드 검색"
-            value={searchQuery}
-            onChange={(e) => {
-              setSearchQuery(e.target.value);
-              setIsExpanded(false);
-            }}
-            aria-label="기사 검색"
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              className="news-search-clear"
-              onClick={() => setSearchQuery('')}
-              aria-label="검색어 지우기"
-            >
-              ✕
-            </button>
-          )}
         </div>
       </div>
 
@@ -212,7 +254,9 @@ export default function NewsPanel({ currentStock }) {
                   title={`${item.title} (새 탭에서 원문 보기)`}
                 >
                   <div className="news-item-top">
-                    <span className="news-source-tag">{currentStock?.name || '종목'} 뉴스</span>
+                    <span className="news-source-tag">
+                      {activeTab === 'ALL' ? (item.author || '전체 증시') : (currentStock?.name || '종목')} 뉴스
+                    </span>
                     {item.sentiment != null && (
                       <span className="news-related-badge">
                         감성 {Number(item.sentiment).toFixed(2)}
@@ -276,10 +320,10 @@ export default function NewsPanel({ currentStock }) {
         )}
       </div>
 
-      {/* 하단 출처 및 RSS 안내 */}
+      {/* 하단 투자 참고용·교육 목적 고지 및 출처 안내 */}
       <div className="news-panel-footer">
         <span>
-          출처: <b>한국경제(hankyung.com) 공식 금융 RSS</b> · 기사 저작권은 한국경제신문사에 있으며 클릭 시 원문으로 연결됩니다.
+          ※ 본 뉴스 및 AI 요약·감성 분석은 <b>투자 참고용·교육 목적</b>으로 제공되며, 실제 투자 판단의 근거로 사용할 수 없습니다.
         </span>
       </div>
     </section>
