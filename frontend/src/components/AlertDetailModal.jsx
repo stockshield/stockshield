@@ -16,12 +16,13 @@ import {
   checkAdminDetection,
   retryAdminAiReason,
   changeAdminAccountStatus,
+  formatDateTime,
 } from '../utils/storage';
 
 const RULE_LABELS = {
-  LOGIN_NEW_ACCESS: '신규 기기·IP 로그인 (LOGIN_NEW_ACCESS)',
-  WITHDRAW_LARGE: '고액·누적 출금 (WITHDRAW_LARGE)',
-  TRADE_NEW_IP: '신규 IP 주식 주문 (TRADE_NEW_IP)',
+  LOGIN_NEW_ACCESS: '새 기기·IP 로그인',
+  WITHDRAW_LARGE: '대량 출금',
+  TRADE_NEW_IP: '새 IP 직후 주문',
 };
 
 const RESULT_LABELS = {
@@ -185,7 +186,7 @@ export default function AlertDetailModal({
                 <span className={`risk-badge ${isEmergency ? 'critical' : 'warning'}`}>
                   {d.rsltCd}
                 </span>
-                <span className="timestamp-text">{d.regTs}</span>
+                <span className="timestamp-text">{formatDateTime(d.regTs)}</span>
               </div>
               <h3>{RULE_LABELS[d.ruleCd] || d.ruleCd}</h3>
             </div>
@@ -234,7 +235,7 @@ export default function AlertDetailModal({
                 </div>
                 <div className="kv-row">
                   <span>계좌번호</span>
-                  <code className="masked-code">{acntNo || '계좌 없음 (로그인 탐지)'}</code>
+                  <code className="masked-code">{acntNo || '해당 없음 (로그인 탐지)'}</code>
                 </div>
                 <div className="kv-row">
                   <span>현재 계좌 상태</span>

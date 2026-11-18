@@ -24,14 +24,15 @@ import {
   fetchAdminReconcileHistory,
   fetchAdminReconcileDetail,
   changeAdminAccountStatus,
+  formatDateTime,
 } from '../utils/storage';
 import { createStompManager } from '../utils/stompClient';
 import AlertDetailModal from './AlertDetailModal';
 
 const RULE_NAME_MAP = {
-  LOGIN_NEW_ACCESS: '신규 기기·IP 로그인',
-  WITHDRAW_LARGE: '고액·누적 출금',
-  TRADE_NEW_IP: '신규 IP 주식 주문',
+  LOGIN_NEW_ACCESS: '새 기기·IP 로그인',
+  WITHDRAW_LARGE: '대량 출금',
+  TRADE_NEW_IP: '새 IP 직후 주문',
 };
 
 // 계좌 잠금(LOCKED) 긴급 경보 Web Audio 알림음
@@ -63,7 +64,7 @@ function playEmergencyAlertSound() {
   }
 }
 
-export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, onSessionExpired }) {
+export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, onSessionExpired, onUncheckedCountChange }) {
   const [activeSection, setActiveSection] = useState('DETECTIONS'); // 'DETECTIONS' | 'RECONCILE' | 'RISK_STOCKS' | 'ACCOUNT_LOCK'
 
   // 1) FDS 탐지 목록 상태
@@ -74,6 +75,8 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
   const [page, setPage] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [totalElements, setTotalElements] = useState(0);
+  const [overallTotalCount, setOverallTotalCount] = useState(0);
+  const [overallUncheckedCount, setOverallUncheckedCount] = useState(0);
   const [loadingDetections, setLoadingDetections] = useState(false);
   const [selectedDetection, setSelectedDetection] = useState(null);
 
@@ -106,21 +109,44 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
   const loadDetections = useCallback(async (targetPage = page, targetRule = ruleFilter, targetChk = chkFilter) => {
     setLoadingDetections(true);
     try {
-      const res = await fetchAdminDetections({
-        ruleCd: targetRule === 'ALL' ? null : targetRule,
-        chkYn: targetChk === 'ALL' ? null : targetChk,
-        page: targetPage,
-        size: 20,
-      });
+      const isUnfiltered = targetRule === 'ALL' && targetChk === 'ALL';
+      const [res, totalRes, uncheckedRes] = await Promise.all([
+        fetchAdminDetections({
+          ruleCd: targetRule === 'ALL' ? null : targetRule,
+          chkYn: targetChk === 'ALL' ? null : targetChk,
+          page: targetPage,
+          size: 20,
+        }),
+        isUnfiltered ? Promise.resolve(null) : fetchAdminDetections({ ruleCd: null, chkYn: null, page: 0, size: 1 }),
+        targetRule === 'ALL' && targetChk === 'N'
+          ? Promise.resolve(null)
+          : fetchAdminDetections({ ruleCd: null, chkYn: 'N', page: 0, size: 1 }),
+      ]);
       if (res.success) {
         setDetections(res.content || []);
-        setTotalElements(Number(res.totalElements ?? 0));
+        const filteredTotal = Number(res.totalElements ?? 0);
+        setTotalElements(filteredTotal);
         setTotalPages(Number(res.totalPages ?? 1));
+        if (isUnfiltered) {
+          setOverallTotalCount(filteredTotal);
+        } else if (totalRes?.success) {
+          setOverallTotalCount(Number(totalRes.totalElements ?? 0));
+        }
+        const nextUnchecked =
+          targetRule === 'ALL' && targetChk === 'N'
+            ? filteredTotal
+            : uncheckedRes?.success
+            ? Number(uncheckedRes.totalElements ?? 0)
+            : null;
+        if (nextUnchecked !== null) {
+          setOverallUncheckedCount(nextUnchecked);
+          onUncheckedCountChange?.(nextUnchecked);
+        }
       }
     } finally {
       setLoadingDetections(false);
     }
-  }, [page, ruleFilter, chkFilter]);
+  }, [page, ruleFilter, chkFilter, onUncheckedCountChange]);
 
   const loadRiskStocks = useCallback(async () => {
     setLoadingRiskStocks(true);
@@ -422,8 +448,8 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
           </div>
           <div className="kpi-info">
             <span className="kpi-title">총 FDS 탐지 기록</span>
-            <strong className="kpi-num">{totalElements.toLocaleString()}건</strong>
-            <span className="kpi-trend text-muted">신규접속 · 고액출금 · 신규IP주문</span>
+            <strong className="kpi-num">{overallTotalCount.toLocaleString()}건</strong>
+            <span className="kpi-trend text-muted">새 기기·IP 로그인 · 대량 출금 · 새 IP 직후 주문</span>
           </div>
         </div>
 
@@ -432,10 +458,10 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
             <AlertTriangle size={20} />
           </div>
           <div className="kpi-info">
-            <span className="kpi-title">현재 페이지 미확인 탐지</span>
-            <strong className="kpi-num text-amber">{uncheckedCount}건</strong>
+            <span className="kpi-title">미확인 FDS 탐지</span>
+            <strong className="kpi-num text-amber">{overallUncheckedCount}건</strong>
             <span className="kpi-trend text-amber">
-              {uncheckedCount > 0 ? '⚠️ 관리자 확인(CHECK) 필요' : '현재 페이지 모두 확인 완료'}
+              {overallUncheckedCount > 0 ? '⚠️ 관리자 확인 필요' : '모두 확인 완료'}
             </span>
           </div>
         </div>
@@ -470,7 +496,7 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
             <CheckCircle2 size={18} className="text-green" />
           </div>
           <div>
-            <span className="audit-label">원장 무결성 및 정합성 대사 (/api/v1/admin/reconcile):</span>
+            <span className="audit-label">원장 무결성 및 정합성 대사:</span>
             <span className="audit-desc">{auditBannerMsg}</span>
           </div>
         </div>
@@ -501,7 +527,7 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
       {/* 상단 섹션 전환 탭 */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
         {[
-          { key: 'DETECTIONS', label: `FDS 탐지 목록 (${totalElements})` },
+          { key: 'DETECTIONS', label: `FDS 탐지 목록 (${overallTotalCount})` },
           { key: 'RISK_STOCKS', label: `위험 의심 종목 (${riskStocks.length})` },
           { key: 'RECONCILE', label: `원장 대사 이력·상세 (${reconcileRuns.length})` },
           { key: 'ACCOUNT_LOCK', label: '계좌 잠금·해제 관리' },
@@ -534,12 +560,12 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
               </div>
 
               <div className="filter-pill-group">
-                <span className="pill-group-label">탐지 규칙(ruleCd):</span>
+                <span className="pill-group-label">탐지 규칙:</span>
                 {[
                   { code: 'ALL', label: '전체' },
-                  { code: 'LOGIN_NEW_ACCESS', label: '신규접속 로그인' },
-                  { code: 'WITHDRAW_LARGE', label: '고액 출금' },
-                  { code: 'TRADE_NEW_IP', label: '신규IP 주문' },
+                  { code: 'LOGIN_NEW_ACCESS', label: '새 기기·IP 로그인' },
+                  { code: 'WITHDRAW_LARGE', label: '대량 출금' },
+                  { code: 'TRADE_NEW_IP', label: '새 IP 직후 주문' },
                 ].map((r) => (
                   <button
                     key={r.code}
@@ -556,7 +582,7 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
               </div>
 
               <div className="filter-pill-group">
-                <span className="pill-group-label">확인 상태(chkYn):</span>
+                <span className="pill-group-label">확인 상태:</span>
                 {[
                   { code: 'ALL', label: '전체' },
                   { code: 'N', label: '미확인 (N)' },
@@ -593,11 +619,11 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
                 <tr>
                   <th>탐지 번호</th>
                   <th>탐지 시각</th>
-                  <th>규칙 코드 (ruleCd)</th>
+                  <th>규칙</th>
                   <th>회원 ID (마스킹)</th>
                   <th>계좌번호</th>
-                  <th>판정 결과 (rsltCd)</th>
-                  <th>확인 여부 (chkYn)</th>
+                  <th>판정 결과</th>
+                  <th>확인 여부</th>
                   <th>상세 및 조치</th>
                 </tr>
               </thead>
@@ -624,7 +650,7 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
                         <td>
                           <span className="alert-code">#{d.dtcSeq}</span>
                         </td>
-                        <td className="time-col">{d.regTs}</td>
+                        <td className="time-col">{formatDateTime(d.regTs)}</td>
                         <td>
                           <strong>{RULE_NAME_MAP[d.ruleCd] || d.ruleCd}</strong>
                           <span className="code-sub" style={{ display: 'block' }}>{d.ruleCd}</span>
@@ -709,7 +735,7 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
         <div className="admin-main-section">
           <div className="table-controls-bar" style={{ justifyContent: 'space-between' }}>
             <strong style={{ color: '#e5ecf4', fontSize: '14px' }}>
-              실시간 위험 의심 종목 목록 (급등 SURGE / 급락 PLUNGE)
+              실시간 위험 의심 종목 목록
             </strong>
             <button type="button" className="pill-btn" onClick={loadRiskStocks} disabled={loadingRiskStocks}>
               <RefreshCw size={13} className={loadingRiskStocks ? 'rotating' : ''} /> 새로고침
@@ -721,10 +747,10 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
                 <tr>
                   <th>종목코드</th>
                   <th>종목명</th>
-                  <th>방향 (dir)</th>
-                  <th>변동률 (chgRt)</th>
-                  <th>위험 판단 사유 (reason)</th>
-                  <th>탐지 시각 (dtcTs)</th>
+                  <th>방향</th>
+                  <th>변동률</th>
+                  <th>위험 판단 사유</th>
+                  <th>탐지 시각</th>
                 </tr>
               </thead>
               <tbody>
@@ -750,7 +776,7 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
                         </strong>
                       </td>
                       <td>{r.reason}</td>
-                      <td className="time-col">{r.dtcTs}</td>
+                      <td className="time-col">{formatDateTime(r.dtcTs)}</td>
                     </tr>
                   ))
                 )}
@@ -793,17 +819,19 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
                         <td><strong>#{run.rcclRunNo}</strong></td>
                         <td>
                           <div>{run.rcclDt}</div>
-                          <small style={{ color: '#8fa0b5' }}>{run.trgDvCd}</small>
+                          <small style={{ color: '#8fa0b5' }}>
+                            {run.trgDvCd === 'SCHEDULED' ? '정기' : run.trgDvCd === 'MANUAL' ? '수동' : run.trgDvCd}
+                          </small>
                         </td>
                         <td>
                           <span className={`status-pill ${run.runStatCd === 'DONE' ? 'executed' : run.runStatCd === 'FAILED' ? 'rejected' : 'hold'}`}>
-                            {run.runStatCd}
+                            {run.runStatCd === 'DONE' ? '완료' : run.runStatCd === 'FAILED' ? '실패' : run.runStatCd}
                           </span>
                         </td>
                         <td>
                           {run.totAcntCnt ?? 0} / <strong style={{ color: run.diffAcntCnt > 0 ? '#ff6b7b' : '#4cd49e' }}>{run.diffAcntCnt ?? 0}</strong>
                         </td>
-                        <td className="time-col">{run.regTs}</td>
+                        <td className="time-col">{formatDateTime(run.regTs)}</td>
                         <td>
                           <button
                             type="button"
@@ -825,7 +853,7 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
               <strong style={{ color: '#e5ecf4', fontSize: '14px' }}>
                 {selectedRunDetail
-                  ? `대사 #${selectedRunDetail.rcclRunNo} 상세 결과 (${selectedRunDetail.rcclDt} · ${selectedRunDetail.runStatCd})`
+                  ? `대사 #${selectedRunDetail.rcclRunNo} 상세 결과 (${selectedRunDetail.rcclDt} · ${selectedRunDetail.runStatCd === 'DONE' ? '완료' : selectedRunDetail.runStatCd === 'FAILED' ? '실패' : selectedRunDetail.runStatCd})`
                   : '대사 상세 결과 (좌측에서 실행 이력을 선택하세요)'}
               </strong>
               {selectedRunDetail && (
@@ -838,7 +866,7 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
                       loadReconcileDetail(selectedRunDetail.rcclRunNo, true);
                     }}
                   >
-                    불일치만(diffOnly=true)
+                    불일치만
                   </button>
                   <button
                     type="button"
@@ -848,7 +876,7 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
                       loadReconcileDetail(selectedRunDetail.rcclRunNo, false);
                     }}
                   >
-                    전체 항목(diffOnly=false)
+                    전체 항목
                   </button>
                 </div>
               )}
@@ -861,9 +889,9 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
                     <th>계좌번호</th>
                     <th>점검 항목</th>
                     <th>종목코드</th>
-                    <th>기대값(expVal)</th>
-                    <th>실제값(actlVal)</th>
-                    <th>불일치(diffYn)</th>
+                    <th>기대값</th>
+                    <th>실제값</th>
+                    <th>불일치</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -911,7 +939,7 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
             계좌 상태 직접 변경 (잠금 LOCKED / 해제 ACTIVE)
           </h3>
           <p style={{ color: '#8fa0b5', fontSize: '12.5px', marginBottom: '16px' }}>
-            탐지 상세 모달뿐 아니라 계좌번호를 직접 지정하여 잠금(`LOCKED`) 또는 잠금 해제(`ACTIVE`) 조치를 수행할 수 있습니다.
+            탐지 상세 모달뿐 아니라 계좌번호를 직접 지정하여 잠금(LOCKED) 또는 잠금 해제(ACTIVE) 조치를 수행할 수 있습니다.
           </p>
           {acntActionMsg && (
             <div style={{ background: '#182b3e', border: '1px solid #355880', borderRadius: '6px', padding: '10px 14px', marginBottom: '14px', color: '#b8d9ff', fontSize: '12.5px' }}>
@@ -920,20 +948,20 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
           )}
           <form onSubmit={handleDirectAccountStatus} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             <div className="form-group">
-              <label htmlFor="admin-acnt-no">대상 계좌번호 (acntNo)</label>
+              <label htmlFor="admin-acnt-no">대상 계좌번호</label>
               <div className="form-control">
                 <input
                   id="admin-acnt-no"
                   type="text"
                   value={targetAcntNo}
                   onChange={(e) => setTargetAcntNo(e.target.value)}
-                  placeholder="예: 10000000018"
+                  placeholder="예: 100000000018"
                   required
                 />
               </div>
             </div>
             <div className="form-group">
-              <label>변경할 상태 (acntStatCd)</label>
+              <label>변경할 상태</label>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <button
                   type="button"
@@ -952,7 +980,7 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
               </div>
             </div>
             <div className="form-group">
-              <label htmlFor="admin-acnt-reason">조치 사유 메모 (actRsnCont, 필수)</label>
+              <label htmlFor="admin-acnt-reason">조치 사유 메모 (필수)</label>
               <div className="form-control">
                 <input
                   id="admin-acnt-reason"

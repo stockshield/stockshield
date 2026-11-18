@@ -55,7 +55,7 @@ export default function SignUpModal({ isOpen, onClose, onRegisterSuccess }) {
   const [wdrPwd, setWdrPwd] = useState('');
   const [confirmWdrPwd, setConfirmWdrPwd] = useState('');
   const [showWdrPwd, setShowWdrPwd] = useState(false);
-  const [initPkgCd, setInitPkgCd] = useState('PKG_10M');
+  const initPkgCd = 'PKG_10M';
   const [terms, setTerms] = useState({
     service: true,
     privacy: true,
@@ -135,14 +135,21 @@ export default function SignUpModal({ isOpen, onClose, onRegisterSuccess }) {
   // 비밀번호 강도 계산 (8~72자, 공백 없는 ASCII, 영문+숫자+특수문자 모두 포함)
   const getPasswordStrength = () => {
     if (!password) return { score: 0, label: '비밀번호를 입력하세요', color: '#6e7f94' };
-    let score = 0;
-    if (password.length >= 8 && password.length <= 72) score++;
-    if (/[a-zA-Z]/.test(password) && /[0-9]/.test(password)) score++;
-    if (/[^a-zA-Z0-9\s]/.test(password)) score++;
+    const missing = [];
+    if (password.length < 8) missing.push('8자 이상');
+    else if (password.length > 72) missing.push('72자 이하');
+    if (/\s/.test(password)) missing.push('공백 제외');
+    if (!/[a-zA-Z]/.test(password)) missing.push('영문');
+    if (!/[0-9]/.test(password)) missing.push('숫자');
+    if (!/[^a-zA-Z0-9\s]/.test(password)) missing.push('특수문자');
 
-    if (score <= 1) return { score: 1, label: '취약 (8자 이상, 영문/숫자 조합 필요)', color: '#ed707b' };
-    if (score === 2) return { score: 2, label: '보통 (특수문자 추가 필요)', color: '#f1cc62' };
-    return { score: 3, label: '안전 (보안 규정 충족: 8자 이상+영문+숫자+특수문자)', color: '#37c48e' };
+    if (missing.length === 0) {
+      return { score: 3, label: '안전 (보안 규정 충족: 8자 이상+영문+숫자+특수문자)', color: '#37c48e' };
+    }
+    if (missing.length === 1) {
+      return { score: 2, label: `보통 (${missing[0]} 필요)`, color: '#f1cc62' };
+    }
+    return { score: 1, label: `취약 (${missing.join('·')} 필요)`, color: '#ed707b' };
   };
 
   const pwStrength = getPasswordStrength();
@@ -303,9 +310,6 @@ export default function SignUpModal({ isOpen, onClose, onRegisterSuccess }) {
             <ShieldCheck size={28} />
           </div>
           <h2 id="signup-title">StockShield 회원가입</h2>
-          <p className="signup-subtitle">
-            이메일 본인인증 및 안전한 모의투자 계좌 개설
-          </p>
         </div>
 
         {/* 단계 표시기 (Stepper) */}
@@ -318,7 +322,7 @@ export default function SignUpModal({ isOpen, onClose, onRegisterSuccess }) {
             <div className={`step-connector ${step > 1 ? 'completed' : ''}`} />
             <div className={`step-item ${step === 2 ? 'active' : ''}`}>
               <div className="step-num">2</div>
-              <span>비밀번호 & 초기자금</span>
+              <span>비밀번호 & 약관 동의</span>
             </div>
           </div>
         )}
@@ -613,26 +617,6 @@ export default function SignUpModal({ isOpen, onClose, onRegisterSuccess }) {
               </div>
             </div>
 
-            {/* 모의투자 초기 자금 패키지 선택 (PKG_10M, PKG_30M, PKG_50M) */}
-            <div className="form-group">
-              <label>
-                <Coins size={14} className="inline-icon" /> 초기 모의투자 자금 패키지 선택
-              </label>
-              <div className="seed-selector">
-                {SEED_PACKAGES.map((item) => (
-                  <button
-                    type="button"
-                    key={item.code}
-                    className={`seed-chip ${initPkgCd === item.code ? 'selected' : ''}`}
-                    onClick={() => setInitPkgCd(item.code)}
-                  >
-                    <strong>₩{item.label}</strong>
-                    <small>{item.badge} ({item.code})</small>
-                  </button>
-                ))}
-              </div>
-            </div>
-
             {/* 약관 및 FDS 동의 */}
             <div className="terms-section">
               <div className="terms-all">
@@ -703,7 +687,7 @@ export default function SignUpModal({ isOpen, onClose, onRegisterSuccess }) {
             </div>
             <h3>환영합니다, {registeredInfo.mbrNm}님!</h3>
             <p className="success-desc">
-              StockShield 회원가입과 모의투자 계좌 개설이 완료되었습니다.
+              회원가입과 계좌 개설이 완료되었습니다.
               <br />
               현재 접속 기기가 첫 신뢰 기기로 안전하게 등록되었습니다.
             </p>
@@ -718,18 +702,6 @@ export default function SignUpModal({ isOpen, onClose, onRegisterSuccess }) {
                 <strong>{registeredInfo.acntNo}</strong>
               </div>
               <div className="summary-row">
-                <span>선택 패키지</span>
-                <span className="fds-badge-pill">
-                  <ShieldCheck size={13} /> {registeredInfo.initPkgCd}
-                </span>
-              </div>
-              <div className="summary-row">
-                <span>초기 지급 예수금</span>
-                <strong className="seed-val">
-                  ₩{Number(registeredInfo.dpsBal ?? registeredInfo.initDpsAmt ?? 0).toLocaleString('ko-KR')}
-                </strong>
-              </div>
-              <div className="summary-row">
                 <span>인증된 이메일</span>
                 <span className="muted-text">{registeredInfo.emlAddr}</span>
               </div>
@@ -738,7 +710,7 @@ export default function SignUpModal({ isOpen, onClose, onRegisterSuccess }) {
             <div className="success-note">
               <Sparkles size={16} />
               <span>
-                FDS 이상거래 탐지 엔진이 신규 IP·기기 접속 및 고액 출금을 실시간으로 보호합니다.
+                FDS가 신규 IP·기기 접속 및 고액 출금을 실시간으로 보호합니다.
               </span>
             </div>
 
@@ -748,7 +720,7 @@ export default function SignUpModal({ isOpen, onClose, onRegisterSuccess }) {
               onClick={handleFinishAndLogin}
               disabled={isLoggingIn}
             >
-              {isLoggingIn ? '로그인 중...' : '로그인하고 모의투자 시작하기'} <ArrowRight size={18} />
+              {isLoggingIn ? '로그인 중...' : '로그인하고 시작하기'} <ArrowRight size={18} />
             </button>
           </div>
         )}

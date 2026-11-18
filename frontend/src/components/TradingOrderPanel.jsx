@@ -258,12 +258,14 @@ export default function TradingOrderPanel({
                   <span>주문 번호</span>
                   <b>{order.ordNo || order.id}</b>
                 </div>
-                <div>
-                  <span>주문 상태</span>
-                  <span className={`order-status-tag ${isFilled ? 'executed' : 'rejected'}`}>
-                    {isFilled ? '체결 완료 (FILLED)' : `주문 거절 (${rjctCode})`}
-                  </span>
-                </div>
+                {isFilled && (
+                  <div>
+                    <span>주문 상태</span>
+                    <span className="order-status-tag executed">
+                      체결 완료 (FILLED)
+                    </span>
+                  </div>
+                )}
                 <div>
                   <span>{isFilled ? '체결 단가' : '기준 단가'}</span>
                   <b>{prc > 0 ? `₩${won(prc)}` : '-'}</b>

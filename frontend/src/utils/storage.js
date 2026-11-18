@@ -1185,7 +1185,7 @@ export async function executeWithdrawal({ wdrAmt, rcvBankNm, rcvAcntNo, wdrPwd =
       replayed: res.replayed,
       traceId: res.traceId,
       user: updatedUser,
-      message: `₩${parsedAmt.toLocaleString('ko-KR')} 모의 출금이 완료되었습니다.`,
+      message: `₩${parsedAmt.toLocaleString('ko-KR')} 출금이 완료되었습니다.`,
     };
   } catch (err) {
     return {
@@ -1515,4 +1515,16 @@ export function lockUserAccount() {}
 
 export async function unlockUserAccount(acntNo, adminComment) {
   return changeAdminAccountStatus(acntNo, 'ACTIVE', adminComment);
+}
+
+/**
+ * ISO-8601 시각 문자열을 KST 일반 날짜 형식(YYYY-MM-DD HH:mm:ss)으로 변환합니다.
+ */
+export function formatDateTime(ts) {
+  if (!ts) return '-';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return String(ts);
+  const pad = (n) => String(n).padStart(2, '0');
+  const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  return `${kst.getUTCFullYear()}-${pad(kst.getUTCMonth() + 1)}-${pad(kst.getUTCDate())} ${pad(kst.getUTCHours())}:${pad(kst.getUTCMinutes())}:${pad(kst.getUTCSeconds())}`;
 }

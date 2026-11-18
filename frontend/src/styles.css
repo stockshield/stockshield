@@ -344,19 +344,16 @@ input:focus-visible {
   width: max-content;
   will-change: transform;
   animation: tickerScroll 55s linear infinite;
-}
-
-.ticker-track:hover {
-  animation-play-state: paused;
+  font-variant-numeric: tabular-nums;
 }
 
 @keyframes tickerScroll {
   0% {
-    transform: translateX(0);
+    transform: translate3d(0, 0, 0);
   }
 
   100% {
-    transform: translateX(-50%);
+    transform: translate3d(-50%, 0, 0);
   }
 }
 
@@ -415,7 +412,7 @@ input:focus-visible {
   max-width: 1860px;
   margin: auto;
   display: grid;
-  grid-template-columns: 280px minmax(460px, 1fr) 330px;
+  grid-template-columns: 265px minmax(0, 1fr);
   min-height: calc(100vh - 113px);
   align-items: start;
 }
@@ -802,11 +799,11 @@ input:focus-visible {
 
 /* --- Center Content Area --- */
 .content {
-  padding: 16px 20px 24px;
+  padding: 12px 16px 20px;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
 }
 
 .welcome {
@@ -938,24 +935,55 @@ input:focus-visible {
   line-height: 1.3;
 }
 
-/* Trading Grid & Stock Overview */
+/* Trading Grid & Stock Overview (차트 3 : 호가 1 : 주문 1) */
 .trading-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) clamp(180px, 21%, 235px);
+  grid-template-columns: minmax(0, 3fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 14px;
   align-items: stretch;
 }
 
 .orderbook-column,
 .orderbook-order-split {
-  display: flex;
-  flex-direction: column;
+  display: contents;
+}
+
+.orderbook-order-split>.orderbook {
   height: 100%;
   min-width: 0;
 }
 
 .split-trade-panel {
-  display: none;
+  display: block;
+  min-width: 0;
+  width: 100%;
+  height: auto;
+  align-self: start;
+}
+
+.split-trade-panel .trading-order-panel {
+  height: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-sizing: border-box;
+}
+
+.split-trade-panel .auth-card {
+  height: auto;
+  max-width: none;
+  margin: 0;
+  justify-content: center;
+}
+
+.split-trade-panel .split-login-prompt {
+  height: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 24px;
 }
 
 .chart-column {
@@ -1071,25 +1099,35 @@ input:focus-visible {
   justify-content: flex-end;
 }
 
-/* 실시간 가격 변동 깜빡임 애니메이션 (MKT_VIEW_001) */
+/* 실시간 가격 변동 하단 바 표시 (눈의 피로 완화) */
 @keyframes priceFlashUp {
-  0% { background-color: rgba(240, 103, 112, 0.35); color: #ff8e96; }
-  100% { background-color: transparent; }
+  0% {
+    box-shadow: inset 0 -2px 0 rgba(240, 103, 112, 0.9);
+  }
+
+  100% {
+    box-shadow: inset 0 -2px 0 transparent;
+  }
 }
 
 @keyframes priceFlashDown {
-  0% { background-color: rgba(77, 156, 242, 0.35); color: #7bb9ff; }
-  100% { background-color: transparent; }
+  0% {
+    box-shadow: inset 0 -2px 0 rgba(77, 156, 242, 0.9);
+  }
+
+  100% {
+    box-shadow: inset 0 -2px 0 transparent;
+  }
 }
 
 .price-flash-up {
-  animation: priceFlashUp 0.45s ease-out;
-  border-radius: 4px;
+  animation: priceFlashUp 0.55s ease-out;
+  padding-bottom: 2px;
 }
 
 .price-flash-down {
-  animation: priceFlashDown 0.45s ease-out;
-  border-radius: 4px;
+  animation: priceFlashDown 0.55s ease-out;
+  padding-bottom: 2px;
 }
 
 .big-price {
@@ -1276,22 +1314,22 @@ input:focus-visible {
   white-space: nowrap;
 }
 
-.chart-ohlc-item > span {
+.chart-ohlc-item>span {
   color: #788ca5;
   font-weight: 600;
 }
 
-.chart-ohlc-item > b {
+.chart-ohlc-item>b {
   color: #e2ecf7;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
 
-.chart-ohlc-item > b.rise {
+.chart-ohlc-item>b.rise {
   color: #f06770;
 }
 
-.chart-ohlc-item > b.fall {
+.chart-ohlc-item>b.fall {
   color: #4d9cf2;
 }
 
@@ -1311,6 +1349,7 @@ input:focus-visible {
 .chart-head {
   justify-content: space-between;
   gap: 10px;
+  min-width: 0;
 }
 
 .section-heading {
@@ -1388,6 +1427,8 @@ input:focus-visible {
   border: 1px solid #1f2b3c;
   overflow: visible;
   position: relative;
+  min-width: 0;
+  flex: 0 1 auto;
   max-width: 100%;
 }
 
@@ -1395,8 +1436,9 @@ input:focus-visible {
   display: flex;
   align-items: center;
   gap: 2px;
-  flex-shrink: 1;
+  flex: 1 1 auto;
   min-width: 0;
+  max-width: 320px;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -1574,16 +1616,19 @@ input:focus-visible {
 }
 
 .chart-wrap {
+  position: relative;
   width: 100%;
-  flex: 1;
-  display: flex;
-  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 455px;
+  overflow: hidden;
 }
 
 .candle-svg {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
 }
 
 .candle-svg.draggable {
@@ -1732,17 +1777,18 @@ input:focus-visible {
 }
 
 .chart-card.fullscreen-chart-active .chart-wrap {
+  position: relative;
   flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  height: auto;
   min-height: 0;
 }
 
 .chart-card.fullscreen-chart-active .candle-svg {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
-  max-height: calc(100vh - 150px);
+  max-height: none;
 }
 
 .chart-card.fullscreen-chart-active .chart-footer {
@@ -1818,7 +1864,7 @@ input:focus-visible {
 }
 
 .book-title {
-  padding: 13px 15px;
+  padding: 10px 12px;
   border-bottom: 1px solid #293544;
 }
 
@@ -1837,13 +1883,13 @@ input:focus-visible {
   text-align: center;
   color: #8494a8;
   font-size: 10px;
-  padding: 8px 7px;
+  padding: 6px 6px;
   border-bottom: 1px solid #293544;
 }
 
 .book-rows {
   display: grid;
-  grid-template-rows: repeat(10, minmax(20px, 1fr)) minmax(28px, 1.2fr) repeat(10, minmax(20px, 1fr));
+  grid-template-rows: repeat(10, minmax(18px, 1fr)) minmax(26px, 1.1fr) repeat(10, minmax(18px, 1fr));
   flex: 1 1 auto;
   min-height: 0;
 }
@@ -1963,10 +2009,10 @@ input:focus-visible {
   position: sticky;
   top: 113px;
   border-left: 1px solid #273241;
-  padding: 18px 14px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   height: calc(100vh - 113px);
   overflow-y: auto;
   box-sizing: border-box;
@@ -3182,21 +3228,21 @@ input:focus-visible {
   background: #0f1622;
   border: 1px solid #253346;
   border-radius: 10px;
-  padding: 12px 14px;
-  margin-bottom: 14px;
+  padding: 9px 11px;
+  margin-bottom: 8px;
 }
 
 .balance-label-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 11px;
+  font-size: 10.5px;
   color: #7a8fa5;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 .balance-total {
-  font-size: 20px;
+  font-size: 17px;
   font-weight: 800;
   color: #f0f5fc;
   letter-spacing: -0.5px;
@@ -3205,9 +3251,9 @@ input:focus-visible {
 .balance-sub-row {
   display: flex;
   justify-content: space-between;
-  font-size: 11px;
-  margin-top: 8px;
-  padding-top: 8px;
+  font-size: 10.5px;
+  margin-top: 4px;
+  padding-top: 4px;
   border-top: 1px solid #1a2536;
 }
 
@@ -3398,14 +3444,14 @@ button:disabled,
 .order-type-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin: 16px 0;
+  gap: 6px;
+  margin: 8px 0;
 }
 
 .order-tab-btn {
-  height: 44px;
-  border-radius: 9px;
-  font-size: 14px;
+  height: 36px;
+  border-radius: 8px;
+  font-size: 13px;
   font-weight: 800;
   border: 1px solid #27364b;
   background: #101824;
@@ -3446,7 +3492,7 @@ button:disabled,
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .mode-label {
@@ -3482,14 +3528,14 @@ button:disabled,
 }
 
 .order-field-group {
-  margin-bottom: 13px;
+  margin-bottom: 8px;
 }
 
 .field-title-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
   font-size: 11px;
   color: #9ab0c7;
   font-weight: 700;
@@ -3521,8 +3567,8 @@ button:disabled,
 }
 
 .step-calc-btn {
-  width: 44px;
-  height: 42px;
+  width: 38px;
+  height: 34px;
   border: 0;
   background: #172232;
   color: #abbdd1;
@@ -3544,20 +3590,28 @@ button:disabled,
 
 .order-number-input {
   flex: 1;
-  height: 42px;
+  height: 34px;
   border: 0;
   background: transparent;
   color: #f0f5fc;
-  font-size: 15px;
+  font-size: 13.5px;
   font-weight: 800;
   text-align: center;
   outline: none;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.order-number-input::-webkit-outer-spin-button,
+.order-number-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 .quick-ticks {
   display: flex;
   gap: 5px;
-  margin-top: 6px;
+  margin-top: 4px;
 }
 
 .quick-ticks button {
@@ -3566,7 +3620,7 @@ button:disabled,
   background: #0f1622;
   color: #879cb5;
   font-size: 10px;
-  padding: 6px 0;
+  padding: 4px 0;
   border-radius: 6px;
   font-weight: 600;
   transition: all 0.12s ease;
@@ -3592,21 +3646,21 @@ button:disabled,
   background: #0e1520;
   border: 1px solid #233348;
   border-radius: 10px;
-  padding: 12px 14px;
-  margin: 14px 0 10px;
+  padding: 8px 11px;
+  margin: 8px 0;
 }
 
 .calc-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 13px;
-  padding: 3px 0;
+  font-size: 12px;
+  padding: 2px 0;
   color: #cbd8e8;
 }
 
 .calc-row strong {
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 800;
 }
 
@@ -3642,10 +3696,10 @@ button:disabled,
 
 .order-submit-btn {
   width: 100%;
-  height: 48px;
+  height: 40px;
   border-radius: 9px;
   border: 0;
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 800;
   color: #ffffff;
   cursor: pointer;
@@ -3858,6 +3912,67 @@ button:disabled,
   font-size: 14px !important;
 }
 
+/* 주문 패널 내부 체결/거절 결과 카드 컴팩트화 (세로 늘어남 방지) */
+.trading-order-panel .order-result-box {
+  padding: 2px 0 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.trading-order-panel .order-result-icon {
+  width: 42px;
+  height: 42px;
+  margin: 0 auto 6px;
+}
+
+.trading-order-panel .order-result-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.trading-order-panel .order-result-title {
+  font-size: 14.5px;
+  margin: 0 0 3px;
+}
+
+.trading-order-panel .order-result-msg {
+  font-size: 11.5px;
+  line-height: 1.35;
+  margin: 0 0 8px;
+}
+
+.trading-order-panel .order-status-notice {
+  padding: 7px 10px;
+  margin: 0 0 8px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.trading-order-panel .order-status-notice strong {
+  font-size: 11.5px;
+  margin-bottom: 2px;
+}
+
+.trading-order-panel .order-summary-table {
+  padding: 6px 10px;
+}
+
+.trading-order-panel .order-summary-table>div {
+  padding: 4px 0;
+  font-size: 11px;
+}
+
+.trading-order-panel .order-result-box .modal-actions {
+  margin-top: 8px !important;
+}
+
+.trading-order-panel .order-result-box .primary-btn {
+  height: 36px;
+  font-size: 12.5px;
+}
+
 /* Holdings accordion in profile card */
 .holdings-section {
   background: #0f1622;
@@ -4007,7 +4122,7 @@ button:disabled,
 
 /* --- Embedded Trading Order Panel (Right Sidebar) --- */
 .trading-order-panel {
-  padding: 18px 15px;
+  padding: 11px 12px;
   background: #121a27;
   border: 1px solid #28374d;
   border-radius: 14px;
@@ -4039,7 +4154,7 @@ button:disabled,
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding-bottom: 12px;
+  padding-bottom: 8px;
   border-bottom: 1px solid #202c3e;
 }
 
@@ -4769,6 +4884,7 @@ button:disabled,
     opacity: 0;
     transform: scale(0.96) translateY(10px);
   }
+
   to {
     opacity: 1;
     transform: scale(1) translateY(0);
@@ -5963,7 +6079,8 @@ button:disabled,
   flex-direction: column;
   gap: 9px;
   margin-top: 16px;
-  margin-bottom: 24px; /* 넉넉하고 명확한 하단 여백 확보 */
+  margin-bottom: 24px;
+  /* 넉넉하고 명확한 하단 여백 확보 */
   padding: 16px 18px;
   background: #0d1624;
   border: 1px solid #233751;

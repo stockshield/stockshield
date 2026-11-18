@@ -128,7 +128,7 @@ class NewsCollectorTest extends IntegrationTestSupport {
     }
 
     @Test
-    @DisplayName("종목 뉴스 API: 최신 5건을 발행 시각 최신순으로, 요약 전 기사는 요약이 null, 없는 종목은 404")
+    @DisplayName("종목 뉴스 API: 최신 6건을 발행 시각 최신순으로, 요약 전 기사는 요약이 null, 없는 종목은 404")
     void stockNewsApi() throws Exception {
         List<FinlightClient.Article> list = new ArrayList<>();
         for (int i = 0; i < 7; i++) {
@@ -142,12 +142,12 @@ class NewsCollectorTest extends IntegrationTestSupport {
 
         mockMvc.perform(get("/api/v1/news/stocks/005930"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(5))
+                .andExpect(jsonPath("$.length()").value(6))
                 .andExpect(jsonPath("$[0].newsTitl").value("삼성전자 소식 6"))
                 .andExpect(jsonPath("$[0].newsUrl").value("https://www.sedaily.com/n/6"))
                 .andExpect(jsonPath("$[0].pubTs").value("2026-11-17T09:06:00+09:00"))
                 .andExpect(jsonPath("$[0].aiSmryCont").doesNotExist())
-                .andExpect(jsonPath("$[4].newsTitl").value("삼성전자 소식 2"));
+                .andExpect(jsonPath("$[5].newsTitl").value("삼성전자 소식 1"));
         mockMvc.perform(get("/api/v1/news/stocks/000660"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(0));
