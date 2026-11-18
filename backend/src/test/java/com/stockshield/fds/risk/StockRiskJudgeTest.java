@@ -82,7 +82,7 @@ class StockRiskJudgeTest extends IntegrationTestSupport {
         Optional<Risk> r = spikeAfter("200002", 30);
         assertThat(r).hasValueSatisfying(x -> {
             assertThat(x.dir()).isEqualTo("UP");
-            assertThat(x.reason()).contains("1분 수익률").contains("Z=");
+            assertThat(x.reason()).startsWith("1분 새 +").endsWith("%, 평소 움직임보다 이례적으로 큼").doesNotContain("Z=");
         });
         assertThat(redis.<String, String>opsForHash().entries("stat:ret:200002")).containsKeys("n", "mean", "std", "z");
     }

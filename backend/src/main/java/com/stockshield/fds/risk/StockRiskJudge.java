@@ -101,17 +101,28 @@ public class StockRiskJudge {
         } else {
             dir = chgRt.signum() >= 0 ? "UP" : "DOWN";
         }
+        return Optional.of(new Risk(tckCd, dir, chgRt, reason(zHit ? m.ret() : null, rateHit ? chgRt : null),
+                ts.format(ISO)));
+    }
+
+    /**
+     * 화면에 그대로 보여 주는 근거 문장. 근거만 담고, 앞의 '위험 의심 종목(급등·급락)'과 뒤의 '투자 참고용'은 화면이 붙인다.
+     * - 1분 급변(Z-Score): "1분 새 -0.26%, 평소 움직임보다 이례적으로 큼" (Z 값 자체는 사용자에게 보여 주지 않는다)
+     * - 전일 대비 ±10%: "전일 대비 -13.94%"
+     * - 둘 다 맞으면 두 근거를 " · "로 잇는다
+     */
+    static String reason(Double minuteRet, BigDecimal chgRt) {
         StringBuilder reason = new StringBuilder();
-        if (zHit) {
-            reason.append(String.format(Locale.ROOT, "1분 수익률 %+.2f%% (Z=%.1f)", m.ret() * 100, z.get()));
+        if (minuteRet != null) {
+            reason.append(String.format(Locale.ROOT, "1분 새 %+.2f%%, 평소 움직임보다 이례적으로 큼", minuteRet * 100));
         }
-        if (rateHit) {
+        if (chgRt != null) {
             if (reason.length() > 0) {
-                reason.append(", ");
+                reason.append(" · ");
             }
             reason.append(String.format(Locale.ROOT, "전일 대비 %+.2f%%", chgRt));
         }
-        return Optional.of(new Risk(tckCd, dir, chgRt, reason.toString(), ts.format(ISO)));
+        return reason.toString();
     }
 
     /** 10초마다: 시세가 60초 넘게 끊긴 종목과 5분이 지나 사라진 표시를 내리고 riskYn=N으로 알린다 */

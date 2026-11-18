@@ -249,7 +249,7 @@ class MarketControllerTest extends IntegrationTestSupport {
     @DisplayName("종목 상세: 현재가, 가장 최근 거래일의 1분봉만 시간순, 위험 의심이면 riskYn=Y와 방향·사유")
     void detail() throws Exception {
         price("Q00002", 20_500, 3, 5000, now());
-        risk("Q00002", "DOWN", "-3", "1분 수익률 -2.10% (Z=-3.4)");
+        risk("Q00002", "DOWN", "-3", "1분 새 -2.10%, 평소 움직임보다 이례적으로 큼");
         bar("Q00002", "202611120930", 19_000);   // 전 거래일
         bar("Q00002", "202611130901", 20_000);
         bar("Q00002", "202611130900", 20_100);
@@ -265,7 +265,7 @@ class MarketControllerTest extends IntegrationTestSupport {
                 .andExpect(jsonPath("$.chart[0].closePrc").value(20_100))
                 .andExpect(jsonPath("$.risk.riskYn").value("Y"))
                 .andExpect(jsonPath("$.risk.dir").value("DOWN"))
-                .andExpect(jsonPath("$.risk.reason").value("1분 수익률 -2.10% (Z=-3.4)"));
+                .andExpect(jsonPath("$.risk.reason").value("1분 새 -2.10%, 평소 움직임보다 이례적으로 큼"));
         mvc.perform(get("/api/v1/market/risk-stocks"))
                 .andExpect(jsonPath("$[0].tckNm").value("큐종목2"));
     }
