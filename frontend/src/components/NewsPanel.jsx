@@ -232,7 +232,7 @@ export default function NewsPanel({ currentStock }) {
               <h3>증권 뉴스</h3>
             </div>
             <p className="news-subtitle">
-              Finlight API로 국내 경제 매체 기사를 10분마다 확인합니다(무료 플랜이라 최대 약 12시간 늦게 반영).
+              Finlight API로 국내 경제 매체 기사를 10분마다 확인합니다.
             </p>
           </div>
         </div>
@@ -242,11 +242,6 @@ export default function NewsPanel({ currentStock }) {
           <span className="news-live-tag">
             <span className="news-live-dot" /> {enabled ? '뉴스 API 연동 중' : '뉴스 API 미설정'}
           </span>
-          {lastUpdated && (
-            <span className="news-last-time">
-              <Clock size={12} /> {formatTimeAgo(lastUpdated)} 갱신
-            </span>
-          )}
           <button
             type="button"
             className={`news-refresh-btn ${loading ? 'loading' : ''}`}
@@ -341,7 +336,7 @@ export default function NewsPanel({ currentStock }) {
                 ? `'${searchQuery}' 검색 결과가 없습니다.`
                 : `'${currentStock?.name || '선택 종목'}' 관련 최근 뉴스가 없습니다.`}
             </h4>
-            <p>Finlight API로 국내 경제 매체 기사를 10분마다 확인하며, 수집된 기사는 AI로 요약됩니다(무료 플랜 기준 최대 약 12시간 지연).</p>
+            <p>Finlight API로 국내 경제 매체 기사를 10분마다 확인하며, 수집된 기사는 AI로 요약됩니다.</p>
           </div>
         )}
       </div>

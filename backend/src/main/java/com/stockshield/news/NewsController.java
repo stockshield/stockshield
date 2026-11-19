@@ -17,14 +17,14 @@ import com.stockshield.common.error.ErrorCode;
 /**
  * 종목 관련 뉴스 조회 (API 명세서 14행, NEWS_AI_001 "뉴스 출력"). 로그인 없이 볼 수 있다(SecurityConfig).
  *
- * GET /api/v1/news/stocks/{tckCd} → 그 종목에 연결된 최신 기사 5건(발행 시각 최신순)
+ * GET /api/v1/news/stocks/{tckCd} → 그 종목에 연결된 최신 기사 6건(발행 시각 최신순)
  * [{newsId, newsTitl, newsUrl, aiSmryCont, aiSntmScr, pubTs}]. 요약 전 기사는 aiSmryCont·aiSntmScr가 null이다.
  * 없는 종목 코드는 404 STOCK_NOT_FOUND (종목 상세와 같음).
  */
 @RestController
 public class NewsController {
 
-    static final int LIMIT = 5;
+    static final int LIMIT = 6;
     private static final DateTimeFormatter ISO = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'+09:00'");
 
     private final JdbcTemplate jdbc;

@@ -64,6 +64,7 @@ import {
   fetchStockPeriodCandles,
   fetchStockOrderbook,
   fetchRiskStocks,
+  fetchAdminDetections,
   searchMarketStocks,
   apiRequest,
   INITIAL_DEMO_USER
@@ -73,6 +74,30 @@ import { DEFAULT_STOCKS } from './stocksData';
 
 const won = (x) => Math.round(Number(x || 0)).toLocaleString('ko-KR');
 const fmtPrice = (x) => `₩${won(x)}`;
+
+function formatRiskNotice(riskInfo) {
+  if (!riskInfo) return '';
+  const dirLabel =
+    riskInfo.dir === 'UP' || riskInfo.dir === 'SURGE'
+      ? '급등'
+      : riskInfo.dir === 'DOWN' || riskInfo.dir === 'PLUNGE'
+      ? '급락'
+      : '주의';
+  const rawReason = String(riskInfo.reason || '').trim();
+  const parts = [];
+  const zMatch = rawReason.match(/1분\s*수익률\s*([+-]?\d+(?:\.\d+)?%)/);
+  if (zMatch) {
+    parts.push(`1분 새 ${zMatch[1]}, 평소 움직임보다 이례적으로 큼`);
+  }
+  const rateMatch = rawReason.match(/전일\s*대비\s*([+-]?\d+(?:\.\d+)?%)/);
+  if (rateMatch) {
+    parts.push(`전일 대비 ${rateMatch[1]}`);
+  }
+  if (parts.length === 0 && rawReason) {
+    parts.push(rawReason);
+  }
+  return [`위험 의심 종목(${dirLabel})`, ...parts, '투자 참고용'].join(' · ');
+}
 
 const MARKET_INDICES = [
   { name: '코스피', en: 'KOSPI', value: '2,583.42', diff: '▲ 18.71', change: '+0.73%', isUp: true },
@@ -615,6 +640,23 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
   const chartWrapRef = useRef(null);
   const intervalMenuRef = useRef(null);
   const dragStartRef = useRef({ x: 0, panOffset: 0, hasMoved: false });
+  const [chartSize, setChartSize] = useState({ width: 890, height: 360 });
+
+  useEffect(() => {
+    const el = chartWrapRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const updateSize = () => {
+      const w = Math.round(el.clientWidth);
+      const h = Math.round(el.clientHeight);
+      if (w > 100 && h > 160) {
+        setChartSize((prev) => (prev.width === w && prev.height === h ? prev : { width: w, height: h }));
+      }
+    };
+    updateSize();
+    const ro = new ResizeObserver(updateSize);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [isFullscreen]);
 
   useEffect(() => {
     if (!isIntervalMenuOpen) return;
@@ -696,19 +738,21 @@ function CandleChart({ stock, chartInterval, setChartInterval, candles, hover, s
   const endIndex = totalCandles - clampedOffset;
   const visibleCandles = candles.slice(startIndex, endIndex);
 
-  // 차트 뷰포트 좌표 (일반 vs 전체화면)
-  const W = isFullscreen ? 1240 : 890;
-  const H = isFullscreen ? 500 : 360;
+  // 차트 뷰포트 좌표 (컨테이너 크기에 맞춰 항상 100% 채움)
+  const W = chartSize.width || (isFullscreen ? 1240 : 890);
+  const H = chartSize.height || (isFullscreen ? 500 : 360);
   const left = isFullscreen ? 20 : 16;
   const right = isFullscreen ? 84 : 76;
   const top = isFullscreen ? 20 : 14;
-  const chartBottom = isFullscreen ? 350 : 255;
-  const volumeTop = isFullscreen ? 385 : 274;
-  const volumeBottom = isFullscreen ? 450 : 322;
-  const xAxisDividerY = isFullscreen ? 456 : 328;
-  const xAxisTextY = isFullscreen ? 472 : 342;
-  const hoverBadgeY = isFullscreen ? 478 : 346;
-  const hoverTextY = isFullscreen ? 491 : 357;
+  const bottomReserved = isFullscreen ? 64 : 50;
+  const volumeHeight = Math.max(36, Math.round(H * 0.14));
+  const volumeBottom = H - bottomReserved + 12;
+  const volumeTop = volumeBottom - volumeHeight;
+  const chartBottom = volumeTop - 16;
+  const xAxisDividerY = volumeBottom + 6;
+  const xAxisTextY = volumeBottom + 20;
+  const hoverBadgeY = volumeBottom + 24;
+  const hoverTextY = volumeBottom + 35;
 
   const high = visibleCandles.length > 0
     ? Math.max(...visibleCandles.map((c) => c.high || 1)) * 1.003
@@ -1394,8 +1438,8 @@ function App() {
     getActiveSession()?.role === 'ADMIN' ? 'admin' : 'trading'
   ); // 'trading' | 'admin'
   const [isOrderHistoryOpen, setIsOrderHistoryOpen] = useState(false);
-  const [alertsList, setAlertsList] = useState(getStoredAlerts);
-  const unresolvedAlertCount = alertsList.filter((a) => a.chkYn === 'N').length;
+  const [unresolvedAlertCount, setUnresolvedAlertCount] = useState(0);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   const [loginId, setLoginId] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -1455,7 +1499,10 @@ function App() {
       if (active && result.success && result.user) {
         setCurrentUser(result.user);
         if (result.user.role === 'ADMIN') {
-          setActiveView('admin');
+          const detRes = await fetchAdminDetections({ chkYn: 'N', page: 0, size: 1 });
+          if (active && detRes.success) {
+            setUnresolvedAlertCount(Number(detRes.totalElements ?? 0));
+          }
         }
       } else if (active && result.status === 401) {
         setCurrentUser(null);
@@ -1822,14 +1869,10 @@ function App() {
     setOrderPrice(customPrice || stock.price);
     setIsOrderOpen(true);
 
-    // 우측/분할 주문 패널 강조 및 부드러운 스크롤 포커스
+    // 분할 주문 패널 강조 및 부드러운 스크롤 포커스
     setIsOrderHighlighted(true);
     setTimeout(() => setIsOrderHighlighted(false), 1300);
-    if (window.innerWidth <= 1150) {
-      splitOrderRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    } else {
-      orderSidebarRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
+    splitOrderRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
 
   // 로그인 완료 공통 처리 (관리자는 관제 화면으로 이동, 일반회원은 트레이딩 화면)
@@ -1852,26 +1895,32 @@ function App() {
   // 로그인 처리 (200 토큰 발급 or 202 새 기기 추가 이메일 인증)
   const handleLogin = async (e) => {
     e?.preventDefault();
+    if (isLoggingIn) return;
     setLoginError('');
     if (!loginId.trim() || !loginPassword) {
       setLoginError('아이디와 비밀번호를 모두 입력해주세요.');
       return;
     }
-    const res = await authenticateUser(loginId, loginPassword);
-    if (res.success && res.user) {
-      applyLoginSuccess(res.user);
-    } else if (res.authRequired) {
-      setLoginEmailAuth({
-        authId: res.authId,
-        mskEmlAddr: res.mskEmlAddr,
-        ttlSec: res.ttlSec || 300,
-        resendCooldown: 60,
-      });
-      setLoginAuthCode('');
-      setLoginAuthError('');
-      alert(`새로운 기기/IP 접속이 감지되었습니다. ${res.mskEmlAddr}로 발송된 6자리 인증 코드를 입력해주세요.`);
-    } else {
-      setLoginError(res.message);
+    setIsLoggingIn(true);
+    try {
+      const res = await authenticateUser(loginId, loginPassword);
+      if (res.success && res.user) {
+        applyLoginSuccess(res.user);
+      } else if (res.authRequired) {
+        setLoginEmailAuth({
+          authId: res.authId,
+          mskEmlAddr: res.mskEmlAddr,
+          ttlSec: res.ttlSec || 300,
+          resendCooldown: 60,
+        });
+        setLoginAuthCode('');
+        setLoginAuthError('');
+        alert(`새로운 기기/IP 접속이 감지되었습니다. ${res.mskEmlAddr}로 발송된 6자리 인증 코드를 입력해주세요.`);
+      } else {
+        setLoginError(res.message);
+      }
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -1929,6 +1978,7 @@ function App() {
   const handleLogout = async () => {
     await logoutUser();
     setCurrentUser(null);
+    setUnresolvedAlertCount(0);
     setIsOrderOpen(false);
     setLoginEmailAuth(null);
     setActiveView('trading');
@@ -2152,8 +2202,8 @@ function App() {
             </button>
           </div>
 
-          <button className="primary-btn" type="submit">
-            로그인 <ArrowRight size={18} />
+          <button className="primary-btn" type="submit" disabled={isLoggingIn}>
+            {isLoggingIn ? '확인 중…' : <>로그인 <ArrowRight size={18} /></>}
           </button>
         </form>
 
@@ -2334,7 +2384,6 @@ function App() {
 
   return (
     <div className="app-shell">
-      <div style={{ padding: "8px 18px", background: "#18352d", color: "#b8eed5", fontSize: 12 }}>Spring Boot 별도 프로젝트 · {serverMode} · 모의투자 전용 · 과거 차트·지수·호가 예시</div>
       {/* 상단 네비게이션 */}
       <header className="topbar">
         <div className="topbar-inner">
@@ -2372,30 +2421,68 @@ function App() {
               </div>
             </div>
 
-            {/* FDS 관제 전환 버튼 (관리자 로그인 시에만 출력, 기능 ID 21) */}
+            {/* FDS 관제 상태 표시 / 관제 센터 이동 버튼 (관리자 로그인 시에만 출력, 기능 ID 21) */}
             {currentUser?.role === 'ADMIN' && (
-              <button
-                type="button"
-                className={`fds-control-nav-btn ${activeView === 'admin' ? 'active' : ''}`}
-                onClick={() => setActiveView(activeView === 'admin' ? 'trading' : 'admin')}
-                title={activeView === 'admin' ? '실시간 트레이딩 대시보드로 돌아가기' : 'FDS 이상거래 관제 센터로 이동'}
-              >
-                <ShieldAlert size={15} />
-                <span>{activeView === 'admin' ? '트레이딩 화면' : 'FDS 관제 센터'}</span>
-                {unresolvedAlertCount > 0 && (
-                  <span className="fds-alert-counter" title="미처리 심사 대기 경보 수">
-                    {unresolvedAlertCount}
-                  </span>
-                )}
-              </button>
+              activeView === 'admin' ? (
+                <div
+                  className="fds-control-nav-btn active"
+                  style={{ cursor: 'default' }}
+                  title="현재 FDS 관제 센터 화면입니다 (시세 이동은 아래 '시세 대시보드 보기' 버튼을 이용하세요)"
+                >
+                  <ShieldAlert size={15} />
+                  <span>관제 화면</span>
+                  {unresolvedAlertCount > 0 && (
+                    <span className="fds-alert-counter" title="미확인 탐지 건수">
+                      {unresolvedAlertCount}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="fds-control-nav-btn"
+                  onClick={() => setActiveView('admin')}
+                  title="FDS 이상거래 관제 센터로 이동"
+                >
+                  <ShieldAlert size={15} />
+                  <span>FDS 관제 센터</span>
+                  {unresolvedAlertCount > 0 && (
+                    <span className="fds-alert-counter" title="미확인 탐지 건수">
+                      {unresolvedAlertCount}
+                    </span>
+                  )}
+                </button>
+              )
             )}
 
             <button
               className="icon-btn"
+              style={{ position: 'relative' }}
               aria-label="알림"
-              onClick={() => alert(currentUser ? `[FDS 보안 관제] 미처리 이상거래 경보: ${unresolvedAlertCount}건 · 모든 보안 모듈 정상 가동 중` : '알림은 로그인 후 확인할 수 있습니다.')}
+              onClick={() => alert(currentUser ? `[FDS 보안 관제] 미확인 이상거래 경보: ${unresolvedAlertCount}건 · 모든 보안 모듈 정상 가동 중` : '알림은 로그인 후 확인할 수 있습니다.')}
             >
               <Bell size={18} />
+              {currentUser?.role === 'ADMIN' && unresolvedAlertCount > 0 && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '-4px',
+                    right: '-4px',
+                    minWidth: '16px',
+                    height: '16px',
+                    padding: '0 4px',
+                    borderRadius: '999px',
+                    background: '#ff4d64',
+                    color: '#fff',
+                    fontSize: '10px',
+                    fontWeight: 800,
+                    lineHeight: '16px',
+                    textAlign: 'center',
+                  }}
+                >
+                  {unresolvedAlertCount}
+                </span>
+              )}
             </button>
 
             {!currentUser && (
@@ -2423,7 +2510,7 @@ function App() {
       <div className="ticker-banner-bar" role="region" aria-label="실시간 시장 지수 티커">
         <div className="ticker-badge" title={krxStatus.tooltip}>
           <span className={`ticker-live-dot ${krxStatus.isOpen ? 'open' : 'closed'}`} />
-          <span>시장 지수 예시</span>
+          <span>시장 지수</span>
           <span className={`ticker-status-pill ${krxStatus.isOpen ? 'open' : 'closed'}`}>
             {krxStatus.statusText}
           </span>
@@ -2454,6 +2541,7 @@ function App() {
             currentUser={currentUser}
             onNotify={alert}
             lastQuoteTime={lastQuoteTime}
+            onUncheckedCountChange={setUnresolvedAlertCount}
             onSessionExpired={() => {
               setCurrentUser(null);
               setActiveView('trading');
@@ -2503,7 +2591,7 @@ function App() {
                     <div className="profile-name-row">
                       <span className="profile-name">{currentUser.name} 님</span>
                     </div>
-                    <div className="profile-id">@{currentUser.id} · 회원</div>
+                    <div className="profile-id">@{currentUser.id} · {currentUser.role === 'ADMIN' ? '관리자' : '회원'}</div>
                   </div>
                   <button
                     type="button"
@@ -2580,11 +2668,11 @@ function App() {
                             </div>
                           );
                         })
-                      ) : (
+                      ) : currentUser.role !== 'ADMIN' ? (
                         <div style={{ fontSize: '11px', color: '#72859b', padding: '6px 2px', textAlign: 'center' }}>
                           보유 중인 주식이 없습니다.<br />우측 주문창에서 매수를 시작해보세요!
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   )}
                 </div>
@@ -2607,11 +2695,11 @@ function App() {
                         type="button"
                         className="user-history-btn"
                         onClick={() => setIsWithdrawOpen(true)}
-                        title="모의 출금 신청 및 출금 내역 확인"
+                        title="출금 신청 및 출금 내역 확인"
                         style={{ flex: 1, background: '#1e324a', borderColor: '#365880', color: '#9cd0ff' }}
                       >
                         <Wallet size={13} />
-                        <span>모의 출금</span>
+                        <span>출금</span>
                       </button>
                     </>
                   )}
@@ -2727,14 +2815,32 @@ function App() {
                         {s.name.slice(0, 1)}
                       </span>
                       <span className="stock-name">
-                        <b>
-                          {s.name}
+                        <b style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+                            {s.name}
+                          </span>
                           {isRisky && (
                             <span
-                              style={{ marginLeft: '5px', fontSize: '10px', background: '#4a1822', color: '#ff7082', border: '1px solid #ff4d64', borderRadius: '3px', padding: '1px 4px', fontWeight: 700 }}
-                              title={riskStocksMap[s.code]?.reason || '위험 의심 종목'}
+                              style={{
+                                flexShrink: 0,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                width: '15px',
+                                height: '15px',
+                                borderRadius: '50%',
+                                background: '#4a1822',
+                                color: '#ff7082',
+                                border: '1px solid #ff4d64',
+                                fontSize: '10px',
+                                fontWeight: 800,
+                                lineHeight: 1,
+                                cursor: 'help',
+                              }}
+                              title={formatRiskNotice(riskStocksMap[s.code]) || '위험 의심 종목'}
+                              aria-label={formatRiskNotice(riskStocksMap[s.code]) || '위험 의심 종목'}
                             >
-                              ⚠️ 위험
+                              !
                             </span>
                           )}
                         </b>
@@ -2834,10 +2940,10 @@ function App() {
                       {stock.riskInfo && (
                         <span
                           style={{ background: '#4a1822', color: '#ff7b8b', border: '1px solid #ff4d64', borderRadius: '5px', padding: '2px 8px', fontSize: '11.5px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                          title={stock.riskInfo.reason || '급등/급락 위험 의심 종목'}
+                          title={formatRiskNotice(stock.riskInfo)}
                         >
                           <AlertTriangle size={13} />
-                          위험 의심 ({stock.riskInfo.dir === 'UP' || stock.riskInfo.dir === 'SURGE' ? '급등' : stock.riskInfo.dir === 'DOWN' || stock.riskInfo.dir === 'PLUNGE' ? '급락' : '주의'}): {stock.riskInfo.reason}
+                          {formatRiskNotice(stock.riskInfo)}
                         </span>
                       )}
                       {krxStatus.isOpen && stock.priceDelayed && (
@@ -2891,8 +2997,8 @@ function App() {
                 />
               </div>
 
-              {/* 호가창 & 반응형 분할 주문창 영역 (창 축소 시 호가창 우측에 주문창 표시) */}
-              <div className="orderbook-column orderbook-order-split" ref={splitOrderRef}>
+              {/* 호가창 & 주문창 영역 (데스크톱 2:1:1, 축소 시 호가창·주문창 분할) */}
+              <div className="orderbook-column orderbook-order-split">
                 <OrderBook
                   stock={stock}
                   orderbook={orderbook}
@@ -2900,7 +3006,7 @@ function App() {
                   onSelectPrice={handleOpenOrder}
                 />
 
-                <div className="split-trade-panel">
+                <div className="split-trade-panel" ref={splitOrderRef}>
                   {currentUser ? (
                     currentUser.role === 'ADMIN' ? (
                       <div className="split-login-prompt panel">
@@ -2936,83 +3042,15 @@ function App() {
                       />
                     )
                   ) : (
-                    renderAuthLoginCard('-split')
+                    renderAuthLoginCard('')
                   )}
                 </div>
               </div>
             </div>
 
-            {/* 한국경제 공식 RSS 실시간 증권 뉴스 패널 (10분 자동 수집) */}
+            {/* 증권 뉴스 패널 */}
             <NewsPanel currentStock={stock} />
           </div>
-
-          {/* 우측 사이드바: 데스크톱 주식 거래 주문창 (일반회원 로그인 시) 또는 로그인/추가인증 창 (비로그인 시) */}
-      <aside className={`auth-sidebar ${currentUser ? 'user-logged-in' : 'user-logged-out'}`} ref={orderSidebarRef}>
-        {currentUser ? (
-          currentUser.role === 'ADMIN' ? (
-            <div className="auth-card panel">
-              <div className="auth-mark">
-                <span className="brand-icon large">
-                  <ShieldAlert size={28} />
-                </span>
-              </div>
-              <h2>FDS 관제 관리자</h2>
-              <p>관리자 계정(@{currentUser.id})은 직무 분리 원칙에 따라 주문·출금 기능을 제공하지 않습니다.</p>
-              <button
-                type="button"
-                className="primary-btn"
-                onClick={() => setActiveView('admin')}
-                style={{ marginTop: '12px' }}
-              >
-                FDS 관제 센터로 이동 <ArrowRight size={18} />
-              </button>
-              <button
-                type="button"
-                className="demo-login-shortcut"
-                onClick={handleLogout}
-                style={{ marginTop: '10px', justifyContent: 'center' }}
-              >
-                <LogOut size={14} /> 로그아웃
-              </button>
-            </div>
-          ) : (
-            <>
-              <TradingOrderPanel
-                stock={stock}
-                currentUser={currentUser}
-                orderType={orderType}
-                setOrderType={setOrderType}
-                orderPrice={orderPrice}
-                setOrderPrice={setOrderPrice}
-                balanceCard={renderProfileBalanceCard()}
-                isMarketOpen={krxStatus.isOpen}
-                onOrderSuccess={(updatedUser, msg) => {
-                  setCurrentUser(updatedUser);
-                  alert(msg);
-                }}
-                isHighlighted={isOrderHighlighted}
-              />
-
-              <div className="helper-card">
-                <div className="helper-icon">
-                  <ChartNoAxesCombined size={19} />
-                </div>
-                <div>
-                  <b>더 스마트한 주식 거래</b>
-                  <p>시세 확인부터 거래 보안까지,<br />하나의 플랫폼에서.</p>
-                </div>
-                <ArrowRight size={16} />
-              </div>
-
-              <div className="phase-info">
-                STOCKSHIELD <span>v1.0</span>
-              </div>
-            </>
-          )
-        ) : (
-          renderAuthLoginCard('')
-        )}
-      </aside>
     </main >
       )
 }

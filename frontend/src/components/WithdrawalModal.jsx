@@ -28,6 +28,35 @@ const BANKS = [
   '케이뱅크',
 ];
 
+function formatKoreanWon(raw) {
+  const num = Math.floor(Number(raw));
+  if (!Number.isFinite(num) || num <= 0) return '';
+  const digits = ['', '일', '이', '삼', '사', '오', '육', '칠', '팔', '구'];
+  const smallUnits = ['', '십', '백', '천'];
+  const bigUnits = ['', '만', '억', '조', '경'];
+
+  let n = num;
+  let groupIdx = 0;
+  const parts = [];
+  while (n > 0) {
+    const chunk = n % 10000;
+    if (chunk > 0) {
+      let chunkStr = '';
+      for (let pos = 0; pos < 4; pos++) {
+        const d = Math.floor(chunk / 10 ** pos) % 10;
+        if (d > 0) {
+          const omitOne = d === 1 && (pos > 0 || (groupIdx === 1 && chunk === 1));
+          chunkStr = `${omitOne ? '' : digits[d]}${smallUnits[pos]}${chunkStr}`;
+        }
+      }
+      parts.unshift(`${chunkStr}${bigUnits[groupIdx]}`);
+    }
+    n = Math.floor(n / 10000);
+    groupIdx++;
+  }
+  return `${parts.join('')}원`;
+}
+
 const won = (x) => Math.round(Number(x || 0)).toLocaleString('ko-KR');
 
 export default function WithdrawalModal({ isOpen, onClose, currentUser, onWithdrawSuccess }) {
@@ -193,7 +222,7 @@ export default function WithdrawalModal({ isOpen, onClose, currentUser, onWithdr
               <Wallet size={20} className="primary-icon" />
             </div>
             <div>
-              <h3>모의 출금 및 출금 내역</h3>
+              <h3>출금 및 출금 내역</h3>
               <p className="modal-subtitle">
                 {currentUser?.name} 님 ({currentUser?.accountNo || '-'}) · 출금 가능 예수금 ₩{won(balance)}
               </p>
@@ -212,7 +241,7 @@ export default function WithdrawalModal({ isOpen, onClose, currentUser, onWithdr
               className={`filter-tab ${activeTab === 'REQUEST' ? 'active' : ''}`}
               onClick={() => setActiveTab('REQUEST')}
             >
-              <Wallet size={13} /> 모의 출금 신청
+              <Wallet size={13} /> 출금 신청
             </button>
             <button
               type="button"
@@ -248,7 +277,7 @@ export default function WithdrawalModal({ isOpen, onClose, currentUser, onWithdr
                     <div className="order-result-icon executed">
                       <CheckCircle2 size={42} />
                     </div>
-                    <h3 className="order-result-title text-green">모의 출금 완료 (DONE)</h3>
+                    <h3 className="order-result-title text-green">출금 완료 (DONE)</h3>
                     <p className="order-result-msg">{outcome.message}</p>
                     {outcome.withdrawal && (
                       <div className="order-summary-table">
@@ -345,12 +374,17 @@ export default function WithdrawalModal({ isOpen, onClose, currentUser, onWithdr
                       required
                     />
                   </div>
+                  {Number(wdrAmt) > 0 && (
+                    <div style={{ fontSize: '12px', color: '#37c48e', marginTop: '5px', fontWeight: 500 }}>
+                      {formatKoreanWon(wdrAmt)}
+                    </div>
+                  )}
                   {!pwdRequiredInfo && (
                     <div className="quick-ticks" style={{ marginTop: '6px' }}>
                       {[
                         { label: '+100만', val: 1000000 },
                         { label: '+300만', val: 3000000 },
-                        { label: '+500만(고액)', val: 5000000 },
+                        { label: '+500만', val: 5000000 },
                         { label: '전액', val: balance },
                       ].map((btn) => (
                         <button
@@ -461,7 +495,7 @@ export default function WithdrawalModal({ isOpen, onClose, currentUser, onWithdr
                       ? '출금 처리 중...'
                       : pwdRequiredInfo
                       ? '출금 비밀번호 확인 및 출금 실행'
-                      : '모의 출금 신청'}
+                      : '출금 신청'}
                   </button>
                 </div>
               </form>
@@ -479,7 +513,7 @@ export default function WithdrawalModal({ isOpen, onClose, currentUser, onWithdr
               ) : historyList.length === 0 ? (
                 <div className="empty-order-state">
                   <Clock size={36} className="empty-icon" />
-                  <p>모의 출금 내역이 없습니다.</p>
+                  <p>출금 내역이 없습니다.</p>
                 </div>
               ) : (
                 <table className="order-table">
