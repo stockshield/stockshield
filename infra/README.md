@@ -1,6 +1,13 @@
-# infra: 로컬 개발용 PostgreSQL · Redis · Kafka
+# infra: Docker Compose (로컬 개발 · 배포)
 
-Docker Compose 파일 하나로 팀원 모두 같은 버전의 DB와 Kafka를 띄웁니다.
+| 파일 | 용도 |
+| --- | --- |
+| `docker-compose.yml` | 로컬 개발용. PostgreSQL·Redis·Kafka만 띄우고, 메인 서버·수집기·AI 서버·화면은 각자 PC에서 실행 |
+| `docker-compose.prod.yml` | 배포용(EC2). 전체 서비스를 컨테이너로 띄움 ([배포](#배포-ec2) 참고) |
+| `nginx/` | 배포용 화면 빌드와 프록시 설정 |
+| `.env.example` | 두 compose와 각 서버가 읽는 `infra/.env`의 예시 |
+
+로컬에서는 Compose 파일 하나로 팀원 모두 같은 버전의 DB와 Kafka를 띄웁니다.
 각자 PC에 PostgreSQL·Redis·Kafka를 따로 설치하지 않습니다.
 
 | 서비스 | 이미지 | 내 PC에서 접속 | 컨테이너끼리 접속 |
@@ -112,6 +119,7 @@ docker exec -it stockshield-kafka /opt/kafka/bin/kafka-console-producer.sh --boo
 | `docker exec` 실행 시 `C:/Program Files/Git/opt/...: no such file or directory` | Git Bash의 경로 자동 변환 때문입니다. 명령 앞에 `MSYS_NO_PATHCONV=1 `을 붙이거나 PowerShell에서 실행하세요 |
 | Kafka가 `unhealthy` | `logs -f kafka`로 오류를 확인하세요. 메모리가 부족하면 Docker Desktop 설정에서 메모리를 늘리세요 |
 
+
 ## 배포 (EC2)
 
 배포는 `infra/docker-compose.prod.yml` 하나로 전체 서비스를 띄웁니다.
@@ -120,10 +128,23 @@ docker exec -it stockshield-kafka /opt/kafka/bin/kafka-console-producer.sh --boo
 |---|---|
 | 서버 | AWS EC2 m7i-flex.large (시드니 ap-southeast-2), Ubuntu 24.04, Docker + compose |
 | 주소 | `http://13.55.65.203` (탄력적 IP, 서버를 중지했다 켜도 같음) |
-| 바깥에 여는 포트 | nginx 80 하나. SSH 22는 허용한 IP에서만 |
+| 바깥에 여는 포트 | nginx 80 하나. SSH 22는 보안 그룹에 등록한 IP에서만 |
 | docker 네트워크 | `172.28.0.0/16` 고정, nginx는 `172.28.0.10` 고정 (메인 서버가 믿는 프록시 주소) |
 
+### 서비스
+
+| 서비스 | 내용 | 컨테이너끼리 주소 |
+|---|---|---|
+| `postgres` | PostgreSQL 15.19 (`postgres-data` 볼륨) | `postgres:5432` |
+| `redis` | Redis 7.2.17 (`redis-data` 볼륨) | `redis:6379` |
+| `kafka`, `kafka-init` | Kafka 3.7.2. `kafka-init`은 `market.tick` 토픽을 만들고 끝남 | `kafka:29092` |
+| `ai-server` | AI 서버 (`ai-server/`) | `ai-server:8000` |
+| `backend` | 메인 서버 (`backend/`). 원장·FDS·시세 조회·WebSocket·뉴스 수집 | `backend:8080` |
+| `collector` | 시세 수집기 (`collector/`, 기록 파일은 `collector-data` 볼륨) | - |
+| `nginx` | 화면(`frontend/`) 빌드 결과 + `/api`·`/ws` 프록시 | 바깥 80 |
+
 nginx가 화면 빌드 파일을 내보내고 `/api`·`/ws`를 메인 서버로 넘깁니다. `/ws`에는 WebSocket 업그레이드 헤더(Upgrade, Connection)를, 모든 요청에는 nginx가 직접 본 사용자 주소를 `X-Forwarded-For`로 넘깁니다(화면이 보낸 값은 버림).
+Kafka UI는 배포에 넣지 않습니다.
 
 ### 서버의 .env
 
@@ -137,6 +158,34 @@ nginx가 화면 빌드 파일을 내보내고 `/api`·`/ws`를 메인 서버로 
 - `SPRING_PROFILES_ACTIVE`: 기본 `prod`. 관리자 값 없이 시험할 때만 `default`로 두고, 시험 뒤 `down -v`로 DB를 비움(V4는 한 번만 실행되기 때문)
 - DB·Redis·Kafka·AI 서버 주소는 compose가 서비스 이름(postgres, redis, kafka:29092, ai-server:8000)으로 넣으므로 .env에 쓰지 않음
 
+### 새 코드 올리기
+
+내 PC(저장소 최상위 폴더)에서 배포할 커밋을 묶어 서버로 보냅니다. 압축 파일에는 `infra/.env`가 없으므로 풀어도 서버의 `.env`는 그대로 남습니다.
+
+```bash
+git fetch origin
+git -c core.autocrlf=false archive --format=tar.gz -o deploy.tgz origin/develop
+scp -i <내 SSH 키> deploy.tgz ubuntu@13.55.65.203:~/
+```
+
+서버에서 풀고 바뀐 서비스만 다시 빌드합니다.
+
+```bash
+cd ~/stockshield
+cp infra/.env ~/env.backup              # 만일을 위한 백업
+tar xzf ~/deploy.tgz
+docker compose -f infra/docker-compose.prod.yml --env-file infra/.env up -d --build backend   # 화면만 바뀌었으면 nginx
+```
+
+| 바뀐 폴더 | 다시 빌드할 서비스 |
+|---|---|
+| `backend/` | `backend` |
+| `frontend/`, `infra/nginx/` | `nginx` |
+| `collector/` | `collector` |
+| `ai-server/` | `ai-server` |
+
+화면 CI는 빌드만 확인하므로, 화면을 배포한 뒤에는 브라우저로 사이트를 열어 오류가 없는지 꼭 봅니다.
+
 ### 실행 · 확인 · 종료 (서버에서)
 
 ```bash
@@ -149,6 +198,23 @@ docker compose -f infra/docker-compose.prod.yml down        # 데이터(볼륨)�
 
 수집기 녹화 파일은 `collector-data` 볼륨에 남습니다. 꺼내려면 `docker compose -f infra/docker-compose.prod.yml cp collector:/app/data ./data`를 씁니다.
 
+### 자동 켜기 · 끄기와 정기 작업
+
+서버는 AWS EventBridge Scheduler(시드니)가 평일에만 켜고 끕니다. 이 시간 밖에는 사이트가 열리지 않으니, 필요하면 EC2 콘솔에서 직접 켭니다(**인스턴스 상태 → 인스턴스 시작**).
+
+| 시각 (한국, 평일) | 하는 일 | 어디서 |
+|---|---|---|
+| 08:40 | 서버 켜기 (`stockshield-start`) | EventBridge Scheduler |
+| 08:50 | 전날 대사 결과 확인 (서버가 꺼져 있었으면 건너뜀) | GitHub Actions `reconcile.yml` |
+| 09:00~15:30 | 실시간 시세 수집, 주문은 15:20까지 | collector, backend |
+| 16:00 | 원장 대사 | backend |
+| 16:10 | 공식 일봉 저장 (빠진 날은 다음 실행 때 채움) | backend |
+| 16:20 | 당일 대사 결과 확인 (실패하면 날짜별 이슈 생성) | GitHub Actions `reconcile.yml` |
+| 16:30 | 서버 끄기 (`stockshield-stop`) | EventBridge Scheduler |
+
+- GitHub Actions 예약 실행은 몇 시간 늦게 돌 수 있습니다. 그때 서버가 꺼져 있으면 '서버 꺼짐, 확인 못 함'으로 끝나고 다음 실행이 다시 확인합니다.
+- 수능처럼 개장 시각이 바뀌는 날은 코드가 따로 처리하지 않습니다.
+
 ### 비용
 
-크레딧(무료 플랜)에서 서버 시간당 약 $0.12가 빠집니다. 쓰지 않는 기간에는 EC2 콘솔에서 인스턴스를 **중지**합니다(설정·데이터·고정 IP 유지). 발표가 끝나면 인스턴스를 종료하고 탄력적 IP를 해제합니다.
+크레딧(무료 플랜)에서 서버가 켜져 있는 시간당 약 $0.12가 빠지고, 꺼져 있어도 디스크·고정 IP 요금이 조금 나갑니다. 쓰지 않는 기간에는 일정을 끄거나 인스턴스를 **중지**합니다(설정·데이터·고정 IP 유지). 발표가 끝나면 인스턴스를 종료하고 탄력적 IP를 해제합니다.
