@@ -442,7 +442,20 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
 
       {/* 관제 지표 요약 카드 그리드 */}
       <div className="admin-kpi-grid">
-        <div className="admin-kpi-card" onClick={() => setActiveSection('DETECTIONS')} style={{ cursor: 'pointer' }}>
+        <div
+          className="admin-kpi-card"
+          onClick={() => {
+            setActiveSection('DETECTIONS');
+            setRuleFilter('ALL');
+            setChkFilter('ALL');
+            setSearchQuery('');
+            setPage(0);
+            if (ruleFilter === 'ALL' && chkFilter === 'ALL') {
+              loadDetections(0, 'ALL', 'ALL');
+            }
+          }}
+          style={{ cursor: 'pointer' }}
+        >
           <div className="kpi-icon-wrap bg-blue">
             <Activity size={20} />
           </div>
@@ -453,7 +466,20 @@ export default function AdminFdsPanel({ onBackToTrading, currentUser, onNotify, 
           </div>
         </div>
 
-        <div className="admin-kpi-card highlight-card" onClick={() => { setActiveSection('DETECTIONS'); setChkFilter('N'); }} style={{ cursor: 'pointer' }}>
+        <div
+          className="admin-kpi-card highlight-card"
+          onClick={() => {
+            setActiveSection('DETECTIONS');
+            setRuleFilter('ALL');
+            setChkFilter('N');
+            setSearchQuery('');
+            setPage(0);
+            if (ruleFilter === 'ALL' && chkFilter === 'N') {
+              loadDetections(0, 'ALL', 'N');
+            }
+          }}
+          style={{ cursor: 'pointer' }}
+        >
           <div className="kpi-icon-wrap bg-amber">
             <AlertTriangle size={20} />
           </div>
