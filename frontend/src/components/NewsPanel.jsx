@@ -12,19 +12,18 @@ import {
 } from 'lucide-react';
 
 import { API_BASE, fetchStockNews } from '../utils/storage';
-function formatTimeAgo(dateStr) {
-  if (!dateStr) return '최신';
+function formatNewsDate(dateStr) {
+  if (!dateStr) return '-';
   try {
     const pub = new Date(dateStr);
-    if (isNaN(pub.getTime())) return dateStr;
-    const now = new Date();
-    const diffSec = Math.floor((now - pub) / 1000);
-    if (diffSec < 60) return '방금 전';
-    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}분 전`;
-    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}시간 전`;
-    return pub.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
+    if (isNaN(pub.getTime())) return String(dateStr).slice(0, 10);
+    const kst = new Date(pub.getTime() + 9 * 60 * 60 * 1000);
+    const y = kst.getUTCFullYear();
+    const m = String(kst.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(kst.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   } catch {
-    return dateStr;
+    return String(dateStr).slice(0, 10);
   }
 }
 
@@ -283,7 +282,7 @@ export default function NewsPanel({ currentStock }) {
                         감성 {Number(item.sentiment).toFixed(2)}
                       </span>
                     )}
-                    <span className="news-item-time">{formatTimeAgo(item.publishedAt)}</span>
+                    <span className="news-item-time">{formatNewsDate(item.publishedAt)}</span>
                   </div>
 
                   <strong className="news-item-title">

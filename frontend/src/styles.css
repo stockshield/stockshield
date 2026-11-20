@@ -43,7 +43,7 @@ input:focus-visible {
 
 /* --- Topbar --- */
 .topbar {
-  height: 75px;
+  height: 58px;
   border-bottom: 1px solid #25303c;
   background: #101722;
   position: sticky;
@@ -240,9 +240,9 @@ input:focus-visible {
 /* --- Moving Ticker Banner Bar (Directly below Topbar) --- */
 .ticker-banner-bar {
   position: sticky;
-  top: 75px;
+  top: 58px;
   z-index: 9;
-  height: 38px;
+  height: 32px;
   background: #0e1520;
   border-bottom: 1px solid #1e2a3a;
   display: flex;
@@ -413,19 +413,19 @@ input:focus-visible {
   margin: auto;
   display: grid;
   grid-template-columns: 265px minmax(0, 1fr);
-  min-height: calc(100vh - 113px);
+  min-height: calc(100vh - 90px);
   align-items: start;
 }
 
 /* --- Left Sidebar (Account & Market Watch) --- */
 .left-sidebar {
   position: sticky;
-  top: 113px;
+  top: 90px;
   border-right: 1px solid #26303e;
-  padding: 14px 10px;
+  padding: 10px 10px;
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 113px);
+  height: calc(100vh - 90px);
   overflow-y: auto;
   overflow-x: hidden;
   background: #0e141f;
@@ -668,8 +668,9 @@ input:focus-visible {
   align-items: flex-end;
   flex-shrink: 0;
   text-align: right;
-  min-width: 66px;
+  min-width: 72px;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .stock-price b {
@@ -677,6 +678,7 @@ input:focus-visible {
   font-weight: 700;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+  padding-bottom: 2px;
   color: #f1f6fc;
 }
 
@@ -799,11 +801,11 @@ input:focus-visible {
 
 /* --- Center Content Area --- */
 .content {
-  padding: 12px 16px 20px;
+  padding: 10px 14px 16px;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .welcome {
@@ -1012,9 +1014,9 @@ input:focus-visible {
   justify-content: space-between;
   align-items: center;
   flex-wrap: nowrap;
-  padding: 12px 22px;
-  min-height: auto;
-  gap: 20px;
+  padding: 8px 16px;
+  min-height: 50px;
+  gap: 16px;
 }
 
 .stock-overview-main {
@@ -1089,17 +1091,18 @@ input:focus-visible {
 
 .stock-overview-price {
   flex: 0 0 auto;
-  min-width: 0;
-  padding-left: 20px;
+  min-width: 240px;
+  padding-left: 16px;
   border-left: 1px solid #23344a;
   display: flex;
   flex-direction: row;
   align-items: baseline;
-  gap: 14px;
+  gap: 12px;
   justify-content: flex-end;
+  font-variant-numeric: tabular-nums;
 }
 
-/* 실시간 가격 변동 하단 바 표시 (눈의 피로 완화) */
+/* 실시간 가격 변동 하단 바 표시 (눈의 피로 완화 · 레이아웃 시프트 없음) */
 @keyframes priceFlashUp {
   0% {
     box-shadow: inset 0 -2px 0 rgba(240, 103, 112, 0.9);
@@ -1122,20 +1125,20 @@ input:focus-visible {
 
 .price-flash-up {
   animation: priceFlashUp 0.55s ease-out;
-  padding-bottom: 2px;
 }
 
 .price-flash-down {
   animation: priceFlashDown 0.55s ease-out;
-  padding-bottom: 2px;
 }
 
 .big-price {
-  font-size: 30px;
+  font-size: 24px;
   font-weight: 800;
-  letter-spacing: -.8px;
+  letter-spacing: -.6px;
   line-height: 1.15;
+  padding-bottom: 2px;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .big-price small {
@@ -1278,11 +1281,14 @@ input:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 8px 14px;
+  gap: 10px;
+  padding: 5px 10px;
+  min-height: 28px;
   border-top: 1px solid #223042;
   background: #121a26;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  font-variant-numeric: tabular-nums;
 }
 
 .chart-ohlc-date {
@@ -1335,7 +1341,7 @@ input:focus-visible {
 
 /* --- Candle Chart --- */
 .chart-card {
-  padding: 16px 18px 12px;
+  padding: 10px 14px 8px;
   min-height: auto;
 }
 
@@ -1619,7 +1625,8 @@ input:focus-visible {
   position: relative;
   width: 100%;
   flex: 1 1 auto;
-  min-height: 455px;
+  height: 390px;
+  min-height: 390px;
   overflow: hidden;
 }
 
@@ -1804,7 +1811,7 @@ input:focus-visible {
   gap: 12px;
   color: #8193a8;
   font-size: 10px;
-  margin-top: 8px;
+  margin-top: 4px;
   flex-wrap: nowrap;
   white-space: nowrap;
 }
@@ -1864,7 +1871,7 @@ input:focus-visible {
 }
 
 .book-title {
-  padding: 10px 12px;
+  padding: 7px 10px;
   border-bottom: 1px solid #293544;
 }
 
@@ -1873,7 +1880,7 @@ input:focus-visible {
   background: #273544;
   color: #8ca1b6;
   font-size: 9px;
-  padding: 4px 7px;
+  padding: 3px 6px;
   border-radius: 5px;
 }
 
@@ -1883,13 +1890,13 @@ input:focus-visible {
   text-align: center;
   color: #8494a8;
   font-size: 10px;
-  padding: 6px 6px;
+  padding: 4px 6px;
   border-bottom: 1px solid #293544;
 }
 
 .book-rows {
   display: grid;
-  grid-template-rows: repeat(10, minmax(18px, 1fr)) minmax(26px, 1.1fr) repeat(10, minmax(18px, 1fr));
+  grid-template-rows: repeat(10, minmax(17px, 1fr)) minmax(23px, 1.1fr) repeat(10, minmax(17px, 1fr));
   flex: 1 1 auto;
   min-height: 0;
 }
@@ -1901,7 +1908,8 @@ input:focus-visible {
   align-items: center;
   position: relative;
   text-align: center;
-  font-size: 11px;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
 }
 
 .book-row b,
@@ -1910,7 +1918,8 @@ input:focus-visible {
 }
 
 .book-row b {
-  font-size: 11.5px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .book-row.ask {
@@ -3228,33 +3237,36 @@ input:focus-visible {
   background: #0f1622;
   border: 1px solid #253346;
   border-radius: 10px;
-  padding: 9px 11px;
-  margin-bottom: 8px;
+  padding: 7px 10px;
+  margin-bottom: 6px;
+  font-variant-numeric: tabular-nums;
 }
 
 .balance-label-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 10.5px;
+  font-size: 10px;
   color: #7a8fa5;
   margin-bottom: 2px;
 }
 
 .balance-total {
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 800;
   color: #f0f5fc;
-  letter-spacing: -0.5px;
+  letter-spacing: -0.4px;
+  font-variant-numeric: tabular-nums;
 }
 
 .balance-sub-row {
   display: flex;
   justify-content: space-between;
-  font-size: 10.5px;
-  margin-top: 4px;
-  padding-top: 4px;
+  font-size: 10px;
+  margin-top: 3px;
+  padding-top: 3px;
   border-top: 1px solid #1a2536;
+  font-variant-numeric: tabular-nums;
 }
 
 .balance-sub-row span {
@@ -3445,13 +3457,13 @@ button:disabled,
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 6px;
-  margin: 8px 0;
+  margin: 6px 0;
 }
 
 .order-tab-btn {
-  height: 36px;
+  height: 32px;
   border-radius: 8px;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 800;
   border: 1px solid #27364b;
   background: #101824;
@@ -3492,7 +3504,7 @@ button:disabled,
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .mode-label {
@@ -3528,15 +3540,15 @@ button:disabled,
 }
 
 .order-field-group {
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .field-title-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 4px;
-  font-size: 11px;
+  margin-bottom: 3px;
+  font-size: 10.5px;
   color: #9ab0c7;
   font-weight: 700;
 }
@@ -3567,8 +3579,8 @@ button:disabled,
 }
 
 .step-calc-btn {
-  width: 38px;
-  height: 34px;
+  width: 34px;
+  height: 30px;
   border: 0;
   background: #172232;
   color: #abbdd1;
@@ -3590,14 +3602,15 @@ button:disabled,
 
 .order-number-input {
   flex: 1;
-  height: 34px;
+  height: 30px;
   border: 0;
   background: transparent;
   color: #f0f5fc;
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 800;
   text-align: center;
   outline: none;
+  font-variant-numeric: tabular-nums;
   -moz-appearance: textfield;
   appearance: textfield;
 }
@@ -3611,7 +3624,7 @@ button:disabled,
 .quick-ticks {
   display: flex;
   gap: 5px;
-  margin-top: 4px;
+  margin-top: 3px;
 }
 
 .quick-ticks button {
@@ -3620,7 +3633,7 @@ button:disabled,
   background: #0f1622;
   color: #879cb5;
   font-size: 10px;
-  padding: 4px 0;
+  padding: 3px 0;
   border-radius: 6px;
   font-weight: 600;
   transition: all 0.12s ease;
@@ -3646,22 +3659,24 @@ button:disabled,
   background: #0e1520;
   border: 1px solid #233348;
   border-radius: 10px;
-  padding: 8px 11px;
-  margin: 8px 0;
+  padding: 6px 10px;
+  margin: 6px 0;
+  font-variant-numeric: tabular-nums;
 }
 
 .calc-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 12px;
-  padding: 2px 0;
+  font-size: 11.5px;
+  padding: 1.5px 0;
   color: #cbd8e8;
 }
 
 .calc-row strong {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 800;
+  font-variant-numeric: tabular-nums;
 }
 
 .calc-row.sub {
@@ -3696,13 +3711,14 @@ button:disabled,
 
 .order-submit-btn {
   width: 100%;
-  height: 40px;
+  height: 36px;
   border-radius: 9px;
   border: 0;
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 800;
   color: #ffffff;
   cursor: pointer;
+  font-variant-numeric: tabular-nums;
   transition: all 0.15s ease;
 }
 
@@ -4122,7 +4138,7 @@ button:disabled,
 
 /* --- Embedded Trading Order Panel (Right Sidebar) --- */
 .trading-order-panel {
-  padding: 11px 12px;
+  padding: 9px 11px;
   background: #121a27;
   border: 1px solid #28374d;
   border-radius: 14px;
@@ -4154,7 +4170,7 @@ button:disabled,
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding-bottom: 8px;
+  padding-bottom: 6px;
   border-bottom: 1px solid #202c3e;
 }
 

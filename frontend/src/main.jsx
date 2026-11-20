@@ -2015,7 +2015,7 @@ function App() {
   const renderProfileBalanceCard = () => {
     if (!currentUser) return null;
     return (
-      <div className="profile-balance-card" style={{ marginBottom: '12px' }}>
+      <div className="profile-balance-card" style={{ marginBottom: '6px' }}>
         <div className="balance-label-row">
           <span>모의투자 총 보유자산</span>
           <span style={{ color: currentUser.isLocked ? '#ff6666' : (krxStatus.isOpen && isAccountPriceDelayed) ? '#f1cc62' : '#4cd49e' }}>
