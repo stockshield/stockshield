@@ -1,0 +1,16 @@
+# 운영 배포(EC2) 전용 설정. SPRING_PROFILES_ACTIVE=prod로 띄운다.
+server:
+  # nginx가 넣은 X-Forwarded-For를 사용자 IP로 쓰려고 켬 (P11, SYS_SEC_001 #4, 대기 목록 #38)
+  # internal-proxies만으로는 Tomcat이 헤더를 처리하지 않음
+  forward-headers-strategy: native
+  tomcat:
+    remoteip:
+      # nginx 주소 하나만 믿음. 비우면 Boot 기본값이 사설 대역 전체를 믿어 IP를 꾸민 요청이 새 접속 판단을 피함
+      # infra/docker-compose.prod.yml의 nginx ipv4_address와 같아야 함(정규식이라 점은 \.)
+      internal-proxies: '172\.28\.0\.10'
+spring:
+  flyway:
+    placeholders:
+      # .env의 ADMIN_LGN_ID·ADMIN_EML_ADDR·ADMIN_PWD_HASH가 비어 있으면 V4가 실패해 서버가 뜨지 않는다.
+      # 관리자 없이 V4가 '적용됨'으로 남으면 다시 돌지 않기 때문이다 (USR_AUTH_003 #3)
+      adminRequired: true

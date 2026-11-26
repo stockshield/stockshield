@@ -1,0 +1,101 @@
+# 정기 대사 결과 확인 (ADM_REC_001 #4, 기획서 11장)
+#
+# - 메인 서버의 정기 대사는 휴장일과 상관없이 평일 16:00(KST)에 시작하고, 실패하면 1분 간격으로 최대 10번 다시 시도한다.
+# - 예약 두 번 (GitHub 예약 시각은 UTC):
+#   · 평일 16:20 KST "20 7 * * 1-5"  → 오늘 대사
+#   · 평일 08:50 KST "50 23 * * 0-4" → 직전 평일 대사(월요일 아침이면 금요일)
+#   GitHub 예약 실행은 몇 시간까지 늦어질 수 있다(11/16 16:20 예약이 11/17 02:04에 돎).
+#   EC2는 평일 08:40~16:30에만 켜져 있어, 16:20 실행이 늦어지면 아침 실행이 대신 확인한다.
+# - 서버에 연결하지 못하면(EC2 꺼짐) 실패로 치지 않고 요약에 '서버 꺼짐, 확인 못 함'만 남긴다.
+#   서버가 답했는데 불일치 계좌·FAILED·기록 없음·401·서버 오류면 실패 → 저장소 관리자에게 알림 메일과
+#   GitHub 이슈 '정기 대사 확인 실패 YYYYMMDD'(ADM_REC_001 불일치 알림). 같은 대상일 이슈는 하나만(16:20·08:50 둘 다 실패해도).
+#   이슈에는 실행 번호·상태·건수만 넣고 계좌번호는 넣지 않는다.
+# - 16:20 실행이라도 실행 시각이 16:00 전이거나 주말이면(예약이 밀린 경우) 직전 평일을 본다.
+# - 필요한 설정 (Settings → Secrets and variables → Actions)
+#   · Secrets  INTERNAL_TOKEN: 배포 서버 .env의 INTERNAL_TOKEN과 같은 값
+#   · Variables DEPLOY_BASE_URL: 배포 주소 (없으면 http://13.55.65.203)
+#   INTERNAL_TOKEN이 아직 없으면(배포 전) 확인을 건너뛰고 성공으로 끝난다.
+# - 수동 실행(workflow_dispatch)에서는 날짜(YYYYMMDD)를 골라 다시 확인할 수 있다.
+name: reconcile
+
+on:
+  schedule:
+    - cron: "20 7 * * 1-5"     # 16:20 KST, 오늘 대사
+    - cron: "50 23 * * 0-4"    # 08:50 KST(월~금), 직전 평일 대사
+  workflow_dispatch:
+    inputs:
+      rcclDt:
+        description: "확인할 대사일 (YYYYMMDD, 비우면 오늘)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  issues: write       # 대사 실패 이슈 만들기
+
+concurrency:
+  group: reconcile
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: reconcile
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+
+      - name: 설정 확인
+        id: cfg
+        env:
+          INTERNAL_TOKEN: ${{ secrets.INTERNAL_TOKEN }}
+        run: |
+          if [ -z "$INTERNAL_TOKEN" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "### 정기 대사 확인" >> "$GITHUB_STEP_SUMMARY"
+            echo "INTERNAL_TOKEN이 아직 등록되지 않아(배포 전) 확인을 건너뜁니다." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 대사 결과 확인
+        id: check
+        if: steps.cfg.outputs.skip == 'false'
+        env:
+          BASE_URL: ${{ vars.DEPLOY_BASE_URL || 'http://13.55.65.203' }}
+          INTERNAL_TOKEN: ${{ secrets.INTERNAL_TOKEN }}
+          RCCL_DT: ${{ github.event.inputs.rcclDt }}
+          RCCL_TARGET: ${{ github.event.schedule == '50 23 * * 0-4' && 'prev-weekday' || 'today' }}
+        run: python3 .github/scripts/reconcile_check.py
+
+      - name: 실패 이슈 만들기 (서버가 답했는데 실패, 같은 대상일엔 하나만)
+        if: failure() && steps.check.outputs.answered == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RCCL_DT: ${{ steps.check.outputs.rccl_dt }}
+          VERDICT: ${{ steps.check.outputs.verdict }}
+          RUN_NO: ${{ steps.check.outputs.run_no }}
+          STAT: ${{ steps.check.outputs.stat }}
+          TOT: ${{ steps.check.outputs.tot }}
+          DIFF: ${{ steps.check.outputs.diff }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="정기 대사 확인 실패 ${RCCL_DT}"
+          found=$(gh issue list --repo "${{ github.repository }}" --state all --search "in:title \"${title}\"" --json title --jq ".[] | select(.title == \"${title}\") | .title" | head -1)
+          if [ -n "$found" ]; then
+            echo "같은 대상일 이슈가 이미 있어 새로 만들지 않음: ${title}"
+            exit 0
+          fi
+          {
+            echo "대상일: ${RCCL_DT}"
+            echo "판정: ${VERDICT}"
+            echo "실행 번호: ${RUN_NO:-없음}"
+            echo "상태: ${STAT:-없음}"
+            echo "전체 계좌: ${TOT:-없음} · 불일치 계좌 수: ${DIFF:-없음}"
+            echo ""
+            echo "확인 실행: ${RUN_URL}"
+            echo "자세한 계좌 목록은 관리자 화면 대사 이력에서 확인합니다(이슈에는 계좌번호를 넣지 않음)."
+          } > "$RUNNER_TEMP/issue.md"
+          gh issue create --repo "${{ github.repository }}" --title "$title" --body-file "$RUNNER_TEMP/issue.md"

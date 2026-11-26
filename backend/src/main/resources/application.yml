@@ -1,0 +1,137 @@
+# 비밀값은 저장소에 두지 않는다 (SYS_SEC_001 #2).
+# 로컬 실행 시 infra/.env 값을 읽는다. backend/ 에서 실행하면 ../infra/.env, 저장소 루트에서 실행하면 ./infra/.env
+spring:
+  application:
+    name: stockshield
+  config:
+    import: optional:file:../infra/.env[.properties],optional:file:./infra/.env[.properties]
+
+  # 앱(실행) 계정: 감사 테이블은 INSERT만 가능 (SYS_SEC_001 #3, V2 마이그레이션)
+  datasource:
+    url: jdbc:postgresql://localhost:${POSTGRES_PORT:5432}/${POSTGRES_DB:stockshield}
+    username: ${DB_APP_USER:stockshield_app}
+    password: ${DB_APP_PASSWORD}
+    # 동시 사용자 50명 k6 부하(backend/load-test)로 정함: 10 → 20에서 주문 p95 406 → 310ms, 처리량 19% 증가 (SYS_CORE_001 구현방안)
+    # FDS ③ 비동기 작업(fdsExecutor 최대 4)도 이 풀을 함께 씀
+    hikari:
+      maximum-pool-size: 20
+
+  # 소유자(마이그레이션) 계정: 테이블·제약·권한은 Flyway SQL로만 바꾼다 (SYS_ENV_001 #10)
+  flyway:
+    url: ${spring.datasource.url}
+    user: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
+    placeholders:
+      appDbUser: ${DB_APP_USER:stockshield_app}
+      appDbPassword: ${DB_APP_PASSWORD}
+      # 최초 관리자 계정 (V4, USR_AUTH_003 #3). 값은 .env에만 둔다(비밀번호는 BCrypt 해시). 셋 다 비면 넣지 않고 넘어가고,
+      # 운영(prod 프로필, application-prod.yml의 adminRequired=true)에서는 마이그레이션이 실패해 서버가 뜨지 않는다
+      adminLgnId: ${ADMIN_LGN_ID:}
+      adminEmlAddr: ${ADMIN_EML_ADDR:}
+      adminPwdHash: ${ADMIN_PWD_HASH:}
+      adminRequired: false
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate   # 엔티티와 스키마가 맞는지만 확인 (SYS_ENV_001 #10)
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: Asia/Seoul
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 200ms       # SYS_CORE_001 설정: Redis 호출 타임아웃 200ms
+
+  # Kafka: 실시간 시세(market.tick) 수신 전용 (윤제정 영역, 기획서 5장, MKT_TICK_002)
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:${KAFKA_PORT:9092}}
+    consumer:
+      group-id: market-consumer
+      # 다시 켜면 밀린 옛 시세가 아니라 지금 시세부터 읽는다 (주문은 시세 시각으로 지연을 판단)
+      auto-offset-reset: latest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+  # 인증 코드 메일 (USR_AUTH_001, FDS_LGN_001). 팀 전용 Gmail 앱 비밀번호는 .env에만 둔다
+  # 메일 서버가 멈춰도 요청 스레드가 묶이지 않게 연결 3초·읽기 5초·쓰기 5초로 끊는다 (SYS_CORE_002 구현방안 '모든 외부 호출에 타임아웃')
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      "[mail.smtp.auth]": true
+      "[mail.smtp.starttls.enable]": true
+      "[mail.smtp.connectiontimeout]": 3000
+      "[mail.smtp.timeout]": 5000
+      "[mail.smtp.writetimeout]": 5000
+
+  # 사용자 계정은 DB(member)와 JWT로만 다룬다. Spring Security가 만드는 기본 사용자(임시 비밀번호)는 만들지 않는다
+  autoconfigure:
+    exclude: org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
+
+  jackson:
+    time-zone: Asia/Seoul
+
+stockshield:
+  # 모든 @Scheduled 작업(원장 대사, PENDING 만료 정리, 뉴스 수집)을 켜고 끈다. 테스트에서는 false (연결 합의서 3절)
+  scheduling:
+    enabled: true
+  # 시연 모드: true면 주문의 장 운영 시간 검사를 건너뛴다 (MKT_TICK_001 #2, TRD_ORD_001 #2)
+  demo-mode: ${DEMO_MODE:false}
+  market:
+    # KRX 휴장일 중 평일인 날(쉼표로 구분, yyyy-MM-dd). 이 날 주문은 MARKET_CLOSED로 거절한다 (TRD_ORD_001 #2·구현방안). 해마다 KRX 공지로 바꾼다
+    holidays: "2026-12-25,2026-12-31"
+  # 화면 출처. REST CORS와 WebSocket 허용 Origin이 함께 읽는다 (연결 합의서 3절·8절). 쉼표로 여러 개
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173}
+  auth:
+    # JWT 서명 비밀값. 비었거나 32바이트 미만이면 서버가 기동하지 않는다 (SYS_SEC_001 #2)
+    jwt-secret: ${JWT_SECRET:}
+  # 내부 대사 결과 확인 API의 X-Internal-Token. 비어 있으면 그 API는 모든 요청을 401로 거절한다 (연결 합의서 9절)
+  internal-token: ${INTERNAL_TOKEN:}
+  # FDS (윤제정 영역, 연결 합의서 3절 설정 키)
+  fds:
+    withdraw:
+      # 대량 출금 기준 금액(원): 1회 또는 24시간 누적(이번 포함)이 이 금액 이상이면 출금 비밀번호 확인 (FDS_WDR_001 #1)
+      large-threshold: 5000000
+  # AI 서버 (윤제정 영역, FDS_AI_001). enabled=false는 테스트 전용: 끄면 탐지 사유 설명을 요청하지 않고 REQUESTED로 둔다
+  ai:
+    enabled: ${AI_ENABLED:true}
+    base-url: ${AI_SERVER_URL:http://localhost:8000}
+    # 10초 안에 답이 없으면 실패(FAILED)로 저장 (FDS_AI_001 #4)
+    timeout: 10s
+    connect-timeout: 2s
+  # 한국투자증권 REST (메인 서버의 호가 조회). 키는 수집기와 같은 실전 키, 화면에는 절대 내보내지 않는다
+  kis:
+    rest-url: ${KIS_REST_URL:https://openapi.koreainvestment.com:9443}
+    app-key: ${KIS_APP_KEY:}
+    app-secret: ${KIS_APP_SECRET:}
+    timeout: 3s
+  # 호가 캐시: 장중 2초, 장 밖 60초. 같은 종목은 캐시 주기당 KIS 1번
+  orderbook:
+    open-ttl: PT2S
+    closed-ttl: PT60S
+  # 뉴스 수집 (윤제정 영역, NEWS_COL_001·NEWS_AI_001). finlight 무료 플랜 월 5,000건 안에서 평일 07~20시 10분마다
+  news:
+    enabled: ${NEWS_ENABLED:true}
+    finlight-url: https://api.finlight.me
+    finlight-api-key: ${FINLIGHT_API_KEY:}
+    # @Scheduled에 들어가므로 ISO-8601 형식(PT10M)으로 쓴다. "10m"은 기동 실패
+    interval: PT10M
+    initial-delay: PT1M
+    page-size: 100
+    # 배치 한 번에 AI 서버로 요약할 최대 기사 수 (Gemini 무료 등급 한도 보호)
+    summarize-per-batch: 10
+    start-hour: 7
+    end-hour: 20
+
+# 로그 한 줄마다 거래추적번호를 남긴다 (SYS_SEC_001 #6)
+logging:
+  pattern:
+    level: "%5p [%X{traceId:-}]"

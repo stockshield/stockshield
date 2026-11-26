@@ -1,0 +1,7 @@
+# 빌드 컨텍스트(frontend/)에서 이미지에 넣지 않을 것
+node_modules
+dist
+server
+.env
+.env.*
+*.log

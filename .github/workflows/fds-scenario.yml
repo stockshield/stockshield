@@ -1,0 +1,103 @@
+# FDS 공격 시나리오: ./gradlew fdsScenarioTest를 돌리고 결과를 PR 코멘트로 남긴다 (SYS_DEV_001 #2, 합의서 12절)
+#
+# - @Tag("fds-scenario") 테스트만 돈다. 가짜 FDS 없이 실제 FDS로 돈다(ci.yml의 test에서는 빠짐).
+# - 한 번 성공한 뒤 develop 필수 체크에 job 이름 fds-scenario로 넣는다(대기 목록 #59).
+#   필수 체크가 항상 보고되도록 paths 필터는 두지 않는다.
+# - PR 코멘트는 PR마다 하나만 두고 다시 돌면 고친다.
+name: fds-scenario
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: fds-scenario-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fds-scenario:
+    name: fds-scenario
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: chmod +x gradlew
+
+      - name: 공격 시나리오 실행 (실제 FDS, Testcontainers)
+        id: run
+        continue-on-error: true
+        run: ./gradlew fdsScenarioTest --no-daemon
+
+      - name: 결과 요약
+        id: summary
+        if: always()
+        run: |
+          dir=build/test-results/fdsScenarioTest
+          {
+            echo '<!-- fds-scenario -->'
+            echo '### FDS 공격 시나리오 (fdsScenarioTest)'
+            echo
+            if ! ls "$dir"/*.xml > /dev/null 2>&1; then
+              echo '테스트 결과 파일이 없습니다. 빌드 단계에서 실패했는지 로그를 확인하세요.'
+            else
+              echo '| 결과 | 시나리오 |'
+              echo '|---|---|'
+              for f in "$dir"/*.xml; do
+                # testcase마다 이름과 실패 여부를 뽑는다(@DisplayName이 name으로 들어감)
+                python3 - "$f" <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          for tc in ET.parse(sys.argv[1]).getroot().iter('testcase'):
+              failed = tc.find('failure') is not None or tc.find('error') is not None
+              skipped = tc.find('skipped') is not None
+              mark = '❌' if failed else ('⏭️' if skipped else '✅')
+              print(f"| {mark} | {tc.get('name').replace('|', '/')} |")
+          PY
+              done
+              total=$(grep -ho 'tests="[0-9]*"' "$dir"/*.xml | grep -o '[0-9]*' | paste -sd+ | bc)
+              fail=$(grep -ho 'failures="[0-9]*"' "$dir"/*.xml | grep -o '[0-9]*' | paste -sd+ | bc)
+              err=$(grep -ho 'errors="[0-9]*"' "$dir"/*.xml | grep -o '[0-9]*' | paste -sd+ | bc)
+              echo
+              echo "전체 ${total}개, 실패 $((fail + err))개 · 실행: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            fi
+          } > "$RUNNER_TEMP/fds-scenario.md"
+          cat "$RUNNER_TEMP/fds-scenario.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: PR 코멘트 남기기
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr comment "${{ github.event.pull_request.number }}" --repo "${{ github.repository }}" \
+            --body-file "$RUNNER_TEMP/fds-scenario.md" --edit-last --create-if-none
+
+      - name: 테스트 보고서 올리기 (실패했을 때)
+        if: steps.run.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fds-scenario-report
+          path: |
+            backend/build/reports/tests/fdsScenarioTest
+            backend/build/test-results/fdsScenarioTest
+          retention-days: 7
+
+      - name: 시나리오가 실패하면 체크도 실패
+        if: steps.run.outcome == 'failure'
+        run: exit 1
